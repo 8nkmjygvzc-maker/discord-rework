@@ -16,10 +16,17 @@
 
 ## Technische Schulden / Vereinfachungen
 
-- Docker-Compose-Verifikation steht aus (Docker Desktop war bei Phase 0 nicht installiert)
-- Vitest noch nicht eingerichtet (kommt mit Phase 1, sobald es testbare Logik gibt)
 - `@parley/shared` wird als CommonJS gebaut; falls später Browser-Bundlegröße/ESM-Interop drückt, auf Dual-Build (ESM+CJS) umstellen
 - npm 10.9.8 gebündelt mit Node 22 – Update auf npm 11 optional
+- ~~Docker-Compose-Verifikation~~ ✓ nachgeholt (05.07.2026), ~~Vitest-Setup~~ ✓ mit Phase 1 erledigt
+
+## Auth – bewusst auf später verschoben (Stand Phase 1)
+
+- **E-Mail-Verifizierung & Passwort-Reset:** braucht E-Mail-Versand (SMTP-Anbieter); bis dahin sind E-Mail-Adressen unbestätigt
+- **Rate-Limiting für Login/Register:** kommt mit Redis-Anbindung in Phase 2 – wichtig gegen Brute-Force, vor öffentlichem Betrieb Pflicht
+- **Session-Übersicht** („angemeldete Geräte“ + einzeln abmelden): Datenmodell (RefreshToken pro Gerät) ist vorbereitet
+- **2FA/TOTP:** sinnvoll ab echtem Mehrbenutzer-Betrieb
+- Refresh-Token-Karenzzeit (60 s) für parallele Tabs: Standard-Praxis, aber dokumentiert, falls das Fenster später enger werden soll
 
 ## Branding & Rechtliches
 

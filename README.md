@@ -42,8 +42,11 @@ npm run dev:web    # http://localhost:5173
 
 ## Nützliche Befehle
 
-| Befehl           | Zweck                            |
-| ---------------- | -------------------------------- |
-| `npm run build`  | alles bauen (shared → api → web) |
-| `npm run lint`   | ESLint über das gesamte Repo     |
-| `npm run format` | Prettier über das gesamte Repo   |
+| Befehl                    | Zweck                                 |
+| ------------------------- | ------------------------------------- |
+| `npm run build`           | alles bauen (shared → api → web)      |
+| `npm test`                | Vitest in allen Workspaces            |
+| `npm run lint`            | ESLint über das gesamte Repo          |
+| `npm run format`          | Prettier über das gesamte Repo        |
+| `npm run prisma:migrate`  | DB-Migration erstellen/anwenden (Dev) |
+| `npm run prisma:generate` | Prisma-Client neu generieren          |

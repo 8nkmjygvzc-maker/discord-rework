@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 0 abgeschlossen (05.07.2026)
+## Status: Phase 1 abgeschlossen (05.07.2026)
 
 ## Erledigt
 
@@ -13,18 +13,31 @@
 - `infra/docker-compose.yml` mit PostgreSQL 16, Redis 7, MinIO (inkl. Healthchecks, Volumes, `.env`-Anbindung)
 - API: `GET /api/health` liefert `HealthStatus` (Typ aus `@parley/shared`)
 - Web: Statusseite, die `/api/health` über den Vite-Proxy abruft (kein CORS nötig)
-- Git-Repo initialisiert (Branch `main`)
+- Git-Repo initialisiert (Branch `main`), Commit `dca9dfa`
 - Node.js 22 portabel installiert nach `%LOCALAPPDATA%\Programs\nodejs` und in den Benutzer-PATH eingetragen (kein Admin nötig)
+- **Nachverifiziert in Session 2:** Docker Desktop wurde installiert, `docker compose up` läuft – alle drei Container healthy
 
-**Verifiziert:** `npm install` + Builds fehlerfrei, API antwortet auf `/api/health`, Frontend zeigt den API-Status über den Proxy an.
-**Noch offen aus Phase 0:** Docker Desktop ist auf dem Rechner nicht installiert → `docker compose up` konnte nicht verifiziert werden. Vor Phase 1 installieren (braucht Admin-Rechte), dann `docker compose -f infra/docker-compose.yml up -d` testen.
+### Phase 1 – Auth & Nutzerverwaltung (05.07.2026)
+
+- **Prisma** angebunden (Schema in `apps/api/prisma/schema.prisma`, Migration `init`): Modelle `User` und `RefreshToken`; Root-Skripte `prisma:generate` / `prisma:migrate`
+- **Registrierung & Login** (`POST /api/auth/register|login`): Argon2id-Hashing (OWASP-Parameter: 19 MiB, t=2, p=1), generische Fehlermeldung gegen User-Enumeration
+- **Token-Konzept:** Access-Token = JWT (15 min, nur im Speicher des Clients); Refresh-Token = opakes 256-Bit-Token im httpOnly-Cookie (Pfad `/api/auth`, 30 Tage), in der DB nur als SHA-256-Hash
+- **Rotation + Diebstahl-Erkennung:** Jeder Refresh entwertet das alte Token; Wiederverwendung nach 60-s-Karenzzeit beendet alle Sessions des Nutzers. Karenzzeit nötig wegen paralleler Refreshes (mehrere Tabs / React StrictMode) – ohne sie loggt sich die App bei jedem Reload selbst aus (in dieser Phase als echter Bug gefunden und behoben)
+- **Profil:** `GET/PATCH /api/users/me` (AuthGuard, Bearer-JWT), Status-Text + Avatar-URL änderbar
+- **Frontend:** Zustand-Store mit Single-Flight-Refresh und automatischem Retry bei 401, Login-/Registrierungs-Seite, Profilseite mit Status-Bearbeitung und Logout
+- **Vitest** eingerichtet (`apps/api`, Root-Skript `npm test`), Unit-Tests für Token-Utilities
+- `.env` im Root angelegt (JWT_SECRET generiert), `.env.example` erweitert
+
+**Verifiziert (Ende-zu-Ende über die UI):** Registrieren → Profilseite; Status speichern → übersteht Reload; Session-Restore nach Reload; Logout → zurück zum Login; falsches Passwort → generische Fehlermeldung; korrektes Login → Profil. In der DB: nur `$argon2id$…`-Hashes, Refresh-Tokens nur als Hash, nach Logout alle widerrufen. Build/Tests/Lint/Format grün.
 
 ## Nächste Phase
 
-**Phase 1 – Auth & Nutzerverwaltung:** Registrierung, Login, Access-/Refresh-Token, Argon2id-Hashing, Profilseite. Benötigt laufendes PostgreSQL (→ Docker Desktop) und Prisma-Setup.
+**Phase 2 – Echtzeit-Gateway:** WebSocket-Verbindung mit eigenem Opcode-Protokoll, Heartbeat, Redis-Pub/Sub für Multi-Instanz-Betrieb, Online-Status. Verifikation: Zwei Tabs sehen sich gegenseitig als online.
 
 ## Notizen für kommende Sessions
 
 - Projektname „Parley“ ist nur Arbeitstitel (siehe ROADMAP.md)
-- Node ist NICHT systemweit installiert – falls `node` im PATH fehlt: `%LOCALAPPDATA%\Programs\nodejs` (User-PATH ist gesetzt, neue Terminals sollten es finden)
-- Vitest ist noch nicht eingerichtet – bei der ersten testbaren Logik (Phase 1) nachziehen
+- Node ist NICHT systemweit installiert – falls `node` im PATH fehlt: `%LOCALAPPDATA%\Programs\nodejs`
+- Server starten: Preview-Panel-Konfigurationen `api`/`web` (nutzen `scripts/dev-*.cmd`) oder `npm run dev:api` / `npm run dev:web`
+- Infrastruktur: `docker compose -f infra/docker-compose.yml up -d` (Docker Desktop muss laufen)
+- Testnutzer in der Dev-DB: `arian.test@example.com` / `test-passwort-123`
