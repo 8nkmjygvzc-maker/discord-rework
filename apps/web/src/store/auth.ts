@@ -18,6 +18,12 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (changes: UpdateProfileRequest) => Promise<void>;
+  /**
+   * Access-Token für das Gateway-IDENTIFY. Bei forceRefresh (Gateway hat das
+   * Token gerade abgelehnt) wird über das Refresh-Cookie ein frisches geholt.
+   * null = keine Sitzung mehr.
+   */
+  getGatewayToken: (forceRefresh: boolean) => Promise<string | null>;
   /** Authentifizierter Fetch; erneuert den Access-Token bei 401 einmalig. */
   authFetch: <T>(
     path: string,
@@ -87,6 +93,19 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       body: changes,
     });
     set({ user });
+  },
+
+  getGatewayToken: async (forceRefresh) => {
+    const { accessToken } = get();
+    if (accessToken && !forceRefresh) return accessToken;
+    try {
+      const res = await refreshSession();
+      set({ user: res.user, accessToken: res.accessToken });
+      return res.accessToken;
+    } catch {
+      set({ user: null, accessToken: null });
+      return null;
+    }
   },
 
   authFetch: async <T>(

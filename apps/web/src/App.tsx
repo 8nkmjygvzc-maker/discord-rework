@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAuthStore } from './store/auth';
+import { usePresenceStore } from './store/presence';
 import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 
@@ -12,6 +13,15 @@ export default function App() {
   useEffect(() => {
     void initSession();
   }, [initSession]);
+
+  // Gateway-Verbindung an den Login-Zustand koppeln.
+  const userId = user?.id ?? null;
+  useEffect(() => {
+    if (!userId) return;
+    const { connect, disconnect } = usePresenceStore.getState();
+    connect();
+    return disconnect;
+  }, [userId]);
 
   if (!initialized) {
     return (

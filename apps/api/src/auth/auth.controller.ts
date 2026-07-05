@@ -7,9 +7,11 @@ import {
   Req,
   Res,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import type { CookieOptions, Request, Response } from 'express';
 import type { AuthResponse } from '@parley/shared';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { AuthService, IssuedTokens } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -31,10 +33,14 @@ const refreshCookieOptions: CookieOptions = {
 };
 
 @Controller('auth')
+@UseGuards(RateLimitGuard)
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  // Enge Limits gegen Brute-Force/Spam: Registrierung und Login sind die
+  // sensibelsten Endpunkte. Refresh läuft öfter legitim (mehrere Tabs).
   @Post('register')
+  @RateLimit({ limit: 10, windowS: 300 })
   async register(
     @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
@@ -43,6 +49,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @RateLimit({ limit: 10, windowS: 60 })
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() dto: LoginDto,
@@ -52,6 +59,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @RateLimit({ limit: 60, windowS: 60 })
   @HttpCode(HttpStatus.OK)
   async refresh(
     @Req() req: Request,

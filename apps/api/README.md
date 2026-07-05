@@ -1,14 +1,29 @@
 # @parley/api
 
-NestJS-Backend: REST-API und (ab Phase 2) WebSocket-Gateway.
+NestJS-Backend: REST-API und WebSocket-Gateway.
 
 ## Struktur
 
 - `src/health/` – Health-Check (`GET /api/health`)
 - `src/prisma/` – globaler Prisma-Service (PostgreSQL)
+- `src/redis/` – globaler Redis-Service (Presence, Rate-Limiting, Pub/Sub)
+- `src/common/` – wiederverwendbare Bausteine (z. B. `RateLimitGuard`)
 - `src/auth/` – Registrierung, Login, Refresh, Logout
 - `src/users/` – Profil des angemeldeten Nutzers
+- `src/gateway/` – Echtzeit-Gateway (natives `ws`, eigenes Opcode-Protokoll, Presence)
 - Weitere Module folgen phasenweise: Servers, Channels, Messages, Roles, Voice-Signaling
+
+## Echtzeit-Gateway (Phase 2)
+
+WebSocket-Endpunkt `ws://…/gateway` am selben HTTP-Server wie die REST-API.
+Protokolldefinition (Opcodes, Events, Payloads): `packages/shared/src/gateway.ts`.
+
+- Ablauf: HELLO → IDENTIFY (Access-Token) → READY → HEARTBEAT alle 15 s
+- Presence liegt in Redis (`presence:conn:*`-Zähler mit TTL + `presence:users`-Hash),
+  funktioniert dadurch über mehrere API-Instanzen hinweg
+- Alle Dispatch-Events laufen über Redis-Pub/Sub (`gateway:dispatch`) – auch an
+  die eigene Instanz; ein Codepfad für 1..N Instanzen
+- Auth-Endpunkte sind per `RateLimitGuard` (Redis, Fixed Window, pro IP) gedrosselt
 
 ## Endpoints (Phase 1)
 

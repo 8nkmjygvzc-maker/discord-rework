@@ -1,11 +1,14 @@
 import { FormEvent, useState } from 'react';
 import { useAuthStore } from '../store/auth';
+import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
 
 export default function ProfilePage() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const updateProfile = useAuthStore((s) => s.updateProfile);
+  const connected = usePresenceStore((s) => s.connected);
+  const onlineUsers = usePresenceStore((s) => s.onlineUsers);
 
   const [status, setStatus] = useState(user?.status ?? '');
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -48,6 +51,35 @@ export default function ProfilePage() {
             <h1 className="text-2xl font-bold tracking-tight">{user.username}</h1>
             <p className="text-sm text-zinc-400">{user.email}</p>
           </div>
+        </div>
+
+        {/* Live-Presence aus dem Gateway (Phase 2): wer ist gerade online? */}
+        <div className="mt-6 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-300">Gerade online</h2>
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs ${
+                connected ? 'text-emerald-400' : 'text-zinc-500'
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-zinc-600'}`}
+              />
+              {connected ? 'Live verbunden' : 'Verbinde …'}
+            </span>
+          </div>
+          <ul className="mt-3 space-y-1.5" data-testid="online-list">
+            {onlineUsers.map((u) => (
+              <li key={u.id} className="flex items-center gap-2 text-sm">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span>{u.username}</span>
+                {u.id === user.id && <span className="text-xs text-zinc-500">(du)</span>}
+              </li>
+            ))}
+            {connected && onlineUsers.length === 0 && (
+              <li className="text-sm text-zinc-500">Niemand online</li>
+            )}
+          </ul>
         </div>
 
         <dl className="mt-6 space-y-2 rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm">

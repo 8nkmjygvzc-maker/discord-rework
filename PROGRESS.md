@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 1 abgeschlossen (05.07.2026)
+## Status: Phase 2 abgeschlossen (05.07.2026)
 
 ## Erledigt
 
@@ -30,14 +30,37 @@
 
 **Verifiziert (Ende-zu-Ende über die UI):** Registrieren → Profilseite; Status speichern → übersteht Reload; Session-Restore nach Reload; Logout → zurück zum Login; falsches Passwort → generische Fehlermeldung; korrektes Login → Profil. In der DB: nur `$argon2id$…`-Hashes, Refresh-Tokens nur als Hash, nach Logout alle widerrufen. Build/Tests/Lint/Format grün.
 
+### Phase 2 – Echtzeit-Gateway (05.07.2026)
+
+- **Eigenes Opcode-Protokoll** in `packages/shared/src/gateway.ts`: HELLO → IDENTIFY (JWT) → READY → HEARTBEAT/ACK, Dispatch-Events (`READY`, `PRESENCE_UPDATE`), definierte Close-Codes (4001–4004)
+- **Gateway-Server** (`apps/api/src/gateway/`): natives `ws` am selben HTTP-Server (Pfad `/gateway`), Identify-Timeout 10 s, Heartbeat-Intervall 15 s mit 2×-Toleranz, Payload-Limit 64 KiB
+- **Presence in Redis** (`presence:conn:{userId}`-Zähler mit 60-s-TTL als Totmann-Schalter + `presence:users`-Hash); mehrere Tabs = ein Nutzer online; Leichen werden beim Snapshot lazy aufgeräumt
+- **Multi-Instanz-fähig:** alle Events laufen über Redis-Pub/Sub (`gateway:dispatch`), auch für die eigene Instanz – ein Codepfad für 1..N Gateways
+- **Rate-Limiting** (aus ROADMAP nachgezogen): `RateLimitGuard` (Redis, Fixed Window, pro IP) auf register (10/5 min), login (10/min), refresh (60/min)
+- **Frontend:** `GatewayClient` (Reconnect mit exponentiellem Backoff, Heartbeat-Überwachung, Token-Refresh bei Close 4001), Presence-Store (Zustand), Online-Panel auf der Profilseite, `/gateway`-WS-Proxy in Vite
+- **Vite-Alias** `@parley/shared` → TS-Quelle (Rollup kann CJS-Enum-Re-Exports nicht auflösen)
+
+**Verifiziert:** Protokoll-Test-Skript (2 Nutzer: READY-Snapshot, gegenseitige PRESENCE_UPDATEs online/offline, HEARTBEAT_ACK, Close 4001 bei ungültigem Token) – alle Checks grün. UI-Test im Browser: „Gerade online“-Panel zeigt zweiten Nutzer in Echtzeit beim Verbinden/Trennen. Rate-Limit: 12 Login-Versuche → 2× HTTP 429. Build/Tests/Lint grün.
+
 ## Nächste Phase
 
-**Phase 2 – Echtzeit-Gateway:** WebSocket-Verbindung mit eigenem Opcode-Protokoll, Heartbeat, Redis-Pub/Sub für Multi-Instanz-Betrieb, Online-Status. Verifikation: Zwei Tabs sehen sich gegenseitig als online.
+**Phase 3 – Server & Kanäle:** CRUD für Server und Text-Kanäle, Mitgliederliste, beitreten/verlassen. Verifikation: Server + Kanal anlegen, zweiter Nutzer tritt bei – sichtbar in der UI.
+
+## Dev-Umgebung (Stand Session 3, 05.07.2026)
+
+Diese Maschine war frisch aufgesetzt (kein Node, kein Docker, WSL defekt). Docker Desktop braucht Admin + WSL → stattdessen läuft die Infrastruktur **portabel ohne Admin-Rechte**:
+
+- **Node 22.23.1** portabel: `%LOCALAPPDATA%\Programs\nodejs` (im Benutzer-PATH)
+- **PostgreSQL 16.6** (EnterpriseDB-Binaries): `%LOCALAPPDATA%\Programs\parley-infra\pgsql`, Datenverzeichnis `%LOCALAPPDATA%\parley-data\pgdata`, User/PW/DB wie in `.env`
+- **Redis 5.0.14** (tporadowski-Windows-Port): `%LOCALAPPDATA%\Programs\parley-infra\redis`
+- **MinIO**: `%LOCALAPPDATA%\Programs\parley-infra\minio.exe`
+- **Alles starten:** `powershell -ExecutionPolicy Bypass -File scripts\dev-infra.ps1` (startet nur, was nicht schon läuft)
+- `.env` wurde neu erzeugt (frisches `JWT_SECRET`), Migrationen mit `prisma migrate deploy` eingespielt
 
 ## Notizen für kommende Sessions
 
 - Projektname „Parley“ ist nur Arbeitstitel (siehe ROADMAP.md)
 - Node ist NICHT systemweit installiert – falls `node` im PATH fehlt: `%LOCALAPPDATA%\Programs\nodejs`
-- Server starten: Preview-Panel-Konfigurationen `api`/`web` (nutzen `scripts/dev-*.cmd`) oder `npm run dev:api` / `npm run dev:web`
-- Infrastruktur: `docker compose -f infra/docker-compose.yml up -d` (Docker Desktop muss laufen)
-- Testnutzer in der Dev-DB: `arian.test@example.com` / `test-passwort-123`
+- Server starten: Preview-Panel-Konfigurationen `api`/`web` (`.claude/launch.json`, nutzen `scripts/dev-*.cmd`) oder `npm run dev:api` / `npm run dev:web`
+- Infrastruktur: `scripts\dev-infra.ps1` (portabel) oder `docker compose -f infra/docker-compose.yml up -d` (falls Docker vorhanden)
+- Testnutzer in der Dev-DB (frisch angelegt in Session 3): `arian.test@example.com` und `frieda.test@example.com`, Passwort jeweils `test-passwort-123`

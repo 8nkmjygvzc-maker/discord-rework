@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { RateLimitGuard } from '../common/rate-limit.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
@@ -22,7 +23,7 @@ import { ACCESS_TOKEN_TTL } from './token.util';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AuthGuard],
+  providers: [AuthService, AuthGuard, RateLimitGuard],
   exports: [AuthService, AuthGuard, JwtModule],
 })
 export class AuthModule {}

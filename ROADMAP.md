@@ -16,14 +16,18 @@
 
 ## Technische Schulden / Vereinfachungen
 
-- `@parley/shared` wird als CommonJS gebaut; falls später Browser-Bundlegröße/ESM-Interop drückt, auf Dual-Build (ESM+CJS) umstellen
+- `@parley/shared` wird als CommonJS gebaut; der Web-Client umgeht das per Vite-Alias direkt auf die TS-Quelle (Rollup kann CJS-Enum-Re-Exports nicht statisch auflösen). Falls das später stört: Dual-Build (ESM+CJS)
 - npm 10.9.8 gebündelt mit Node 22 – Update auf npm 11 optional
 - ~~Docker-Compose-Verifikation~~ ✓ nachgeholt (05.07.2026), ~~Vitest-Setup~~ ✓ mit Phase 1 erledigt
+- **Presence-Edge-Case:** Stürzt eine Gateway-Instanz hart ab, wird kein `PRESENCE_UPDATE offline` publiziert – der Redis-TTL (60 s) räumt den Zähler auf und `getOnlineUsers()` entfernt Leichen lazy, aber bereits verbundene Clients sehen den Nutzer bis zum nächsten READY-Snapshot als online. Fix-Idee: Redis-Keyspace-Notifications oder periodischer Abgleich
+- **Presence-Snapshot skaliert linear** (`HGETALL presence:users` + EXISTS-Pipeline) – bei sehr vielen Nutzern auf Server-/Freundeskreis-Scoping umstellen (kommt ohnehin mit Phase 3/7)
+- **`trust proxy`** ist in Express nicht gesetzt – `req.ip` ist hinter einem Reverse-Proxy die Proxy-IP. Vor echtem Deployment setzen, sonst drosselt das Rate-Limit alle Nutzer gemeinsam
+- **Dev-Infra ohne Docker:** Auf Maschinen ohne Docker Desktop laufen PostgreSQL/Redis/MinIO portabel (`scripts/dev-infra.ps1`); Redis ist dort ein 5.0-Windows-Port (tporadowski) – für die genutzten Kommandos (INCR/EXPIRE/Pub-Sub) ausreichend, aber kein 1:1-Ersatz für Redis 7 aus docker-compose
 
 ## Auth – bewusst auf später verschoben (Stand Phase 1)
 
 - **E-Mail-Verifizierung & Passwort-Reset:** braucht E-Mail-Versand (SMTP-Anbieter); bis dahin sind E-Mail-Adressen unbestätigt
-- **Rate-Limiting für Login/Register:** kommt mit Redis-Anbindung in Phase 2 – wichtig gegen Brute-Force, vor öffentlichem Betrieb Pflicht
+- ~~Rate-Limiting für Login/Register~~ ✓ mit Phase 2 erledigt (`RateLimitGuard`, Redis Fixed-Window pro IP); weitere Endpunkte bei Bedarf nachziehen
 - **Session-Übersicht** („angemeldete Geräte“ + einzeln abmelden): Datenmodell (RefreshToken pro Gerät) ist vorbereitet
 - **2FA/TOTP:** sinnvoll ab echtem Mehrbenutzer-Betrieb
 - Refresh-Token-Karenzzeit (60 s) für parallele Tabs: Standard-Praxis, aber dokumentiert, falls das Fenster später enger werden soll

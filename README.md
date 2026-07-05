@@ -20,7 +20,11 @@ Der vollständige Arbeitsauftrag steht in [CLAUDE.md](CLAUDE.md), der Projektfor
 ## Voraussetzungen
 
 - **Node.js ≥ 22** (installiert unter `%LOCALAPPDATA%\Programs\nodejs`)
-- **Docker Desktop** (für PostgreSQL/Redis/MinIO – ab Phase 1 nötig)
+- **PostgreSQL 16, Redis, MinIO** – wahlweise:
+  - über **Docker Desktop**: `docker compose -f infra/docker-compose.yml up -d`, oder
+  - **portabel ohne Docker/Admin-Rechte**: Binaries unter `%LOCALAPPDATA%\Programs\parley-infra`,
+    Start per `powershell -ExecutionPolicy Bypass -File scripts\dev-infra.ps1`
+    (Einrichtung siehe PROGRESS.md, Abschnitt „Dev-Umgebung“)
 
 ## Setup & Start
 
@@ -28,13 +32,18 @@ Der vollständige Arbeitsauftrag steht in [CLAUDE.md](CLAUDE.md), der Projektfor
 # 1. Abhängigkeiten installieren
 npm install
 
-# 2. Umgebungsvariablen anlegen
+# 2. Umgebungsvariablen anlegen (JWT_SECRET generieren!)
 copy .env.example .env
 
-# 3. Infrastruktur starten (benötigt Docker Desktop)
+# 3. Infrastruktur starten (Docker ODER portabel, s. o.)
 docker compose -f infra/docker-compose.yml up -d
+# bzw.:  powershell -ExecutionPolicy Bypass -File scripts\dev-infra.ps1
 
-# 4. Backend + Frontend im Dev-Modus (zwei Terminals)
+# 4. DB-Schema anwenden und Prisma-Client generieren
+npm run prisma:generate
+npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+
+# 5. Backend + Frontend im Dev-Modus (zwei Terminals)
 npm run build:shared
 npm run dev:api    # http://localhost:3001/api/health
 npm run dev:web    # http://localhost:5173
