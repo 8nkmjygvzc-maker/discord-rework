@@ -1,27 +1,3 @@
-<<<<<<< HEAD
-# Abhängigkeiten
-node_modules/
-
-# Build-Ausgaben
-dist/
-*.tsbuildinfo
-
-# Umgebungsvariablen – niemals committen (enthalten Secrets)
-.env
-.env.local
-.env.*.local
-
-# Logs & Betriebssystem
-*.log
-.DS_Store
-Thumbs.db
-
-# Test-Coverage
-coverage/
-
-# Lokale Tool-Konfiguration (enthält maschinenspezifische Pfade)
-.claude/
-=======
 # Logs
 logs
 *.log
@@ -165,4 +141,3 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
->>>>>>> a8575d8f53921daf7d3e1d3b5a3b47607b5fbf60
