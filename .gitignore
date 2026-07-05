@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Abhängigkeiten
 node_modules/
 
@@ -22,6 +23,8 @@ coverage/
 # Lokale Tool-Konfiguration (enthält maschinenspezifische Pfade)
 .claude/
 =======
+=======
+>>>>>>> c2096924d344ec0d11102b97201f6c50f6ff38eb
 # Logs
 logs
 *.log
@@ -165,4 +168,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+<<<<<<< HEAD
 >>>>>>> a8575d8f53921daf7d3e1d3b5a3b47607b5fbf60
+=======
+>>>>>>> c2096924d344ec0d11102b97201f6c50f6ff38eb
