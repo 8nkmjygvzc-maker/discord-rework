@@ -1,8 +1,9 @@
-import type { PresenceUpdatePayload, ReadyPayload } from '@parley/shared';
+import type { MessageInfo, PresenceUpdatePayload, ReadyPayload } from '@parley/shared';
 import { GatewayClient } from './gateway';
 import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { useServersStore } from '../store/servers';
+import { useMessagesStore } from '../store/messages';
 
 /**
  * Die eine Gateway-Verbindung des Tabs. Verteilt Dispatch-Events an die
@@ -22,6 +23,9 @@ const client = new GatewayClient({
       case 'PRESENCE_UPDATE':
         usePresenceStore.getState().handlePresenceUpdate(d as PresenceUpdatePayload);
         return;
+      case 'MESSAGE_CREATE':
+        useMessagesStore.getState().handleMessageCreate((d as { message: MessageInfo }).message);
+        return;
       default:
         useServersStore.getState().handleGatewayEvent(t, d);
     }
@@ -38,5 +42,6 @@ export const gateway = {
     client.stop();
     usePresenceStore.getState().handleDisconnected();
     useServersStore.getState().reset();
+    useMessagesStore.getState().reset();
   },
 };

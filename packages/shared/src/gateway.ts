@@ -48,7 +48,9 @@ export type GatewayEventType =
   | 'SERVER_MEMBER_REMOVE'
   | 'CHANNEL_CREATE'
   | 'CHANNEL_UPDATE'
-  | 'CHANNEL_DELETE';
+  | 'CHANNEL_DELETE'
+  // Phase 4 – Text-Chat:
+  | 'MESSAGE_CREATE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {

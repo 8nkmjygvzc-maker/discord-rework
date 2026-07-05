@@ -58,6 +58,17 @@ Refresh-Token: httpOnly-Cookie `parley_refresh` (Pfad `/api/auth`), 30 Tage, rot
 dispatcht (`SERVER_*`, `CHANNEL_*` – gezielt über `publishDispatch(..., userIds)`).
 „Nur Owner“ gilt bis Phase 5 – dann übernimmt das Rollen-/Berechtigungssystem.
 
+## Endpoints (Phase 4 – Nachrichten, Bearer-Auth)
+
+| Methode | Pfad                                      | Zweck                                         |
+| ------- | ----------------------------------------- | --------------------------------------------- |
+| POST    | `/api/channels/:id/messages`              | Nachricht senden (nur Mitglieder, Rate-Limit) |
+| GET     | `/api/channels/:id/messages?before=<ISO>` | History, 50er-Seiten rückwärts                |
+
+Neue Nachrichten erreichen die Mitglieder als `MESSAGE_CREATE`-Gateway-Event.
+Phase 4 speichert bewusst Klartext (`content`) – Phase 6 ersetzt das durch
+Ciphertext + Nonce (E2EE), der Server kann dann nicht mehr mitlesen.
+
 ## Datenbank
 
 ```bash

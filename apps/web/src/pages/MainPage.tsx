@@ -3,6 +3,7 @@ import { useServersStore } from '../store/servers';
 import ServerRail from '../components/ServerRail';
 import ChannelSidebar from '../components/ChannelSidebar';
 import MembersPanel from '../components/MembersPanel';
+import ChatView from '../components/ChatView';
 import Modal from '../components/Modal';
 import { ApiError } from '../lib/api';
 
@@ -49,16 +50,13 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
             onOpenProfile={onOpenProfile}
           />
 
-          {/* Hauptbereich – der eigentliche Chat kommt in Phase 4 */}
-          <main className="flex min-w-0 flex-1 flex-col">
-            <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
-              <span className="text-zinc-500">#</span>
-              <span className="font-semibold">{channel?.name ?? '…'}</span>
-            </header>
-            <div className="flex flex-1 items-center justify-center text-zinc-500">
-              {channel ? `Nachrichten in #${channel.name} – kommt in Phase 4` : 'Wähle einen Kanal'}
-            </div>
-          </main>
+          {channel ? (
+            <ChatView channel={channel} />
+          ) : (
+            <main className="flex min-w-0 flex-1 items-center justify-center text-zinc-500">
+              Wähle einen Kanal
+            </main>
+          )}
 
           <MembersPanel />
         </>

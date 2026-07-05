@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 3 abgeschlossen (05.07.2026)
+## Status: Phase 4 abgeschlossen (05.07.2026)
 
 ## Erledigt
 
@@ -51,9 +51,18 @@
 
 **Verifiziert:** UI: Server „Arians Treffpunkt“ + Kanal „projekte“ angelegt; frieda tritt per ID bei und erscheint OHNE Reload im Mitglieder-Panel (SERVER_MEMBER_ADD). API: Details vor Beitritt 404, Beitritt 201, Doppel-Beitritt 409, Kanal anlegen als Nicht-Owner 403, Server löschen als Nicht-Owner 403 – serverseitig durchgesetzt. Build/Tests/Lint grün.
 
+### Phase 4 – Basis-Text-Chat, unverschlüsselt (05.07.2026)
+
+- **Prisma:** `Message` (content als Klartext – wird in Phase 6 durch ciphertext+nonce ersetzt), Index `(channelId, createdAt)`; Migration `messages`
+- **REST** (`apps/api/src/messages/`): `POST/GET /api/channels/:id/messages`; History rückwärts paginiert (50er-Seiten, `before`-Cursor, `hasMore` über N+1-Trick); Zugriff nur für Server-Mitglieder in TEXT-Kanälen (404 statt 403); Senden rate-limitiert (30/30 s)
+- **Gateway:** `MESSAGE_CREATE` an alle Server-Mitglieder
+- **Frontend:** `ChatView` (Verlauf mit „Ältere laden“, Gruppierung aufeinanderfolgender Nachrichten, Auto-Scroll nur wenn unten, Fehleranzeige mit Draft-Erhalt), Messages-Store mit Dedupe (REST-Antwort vs. Gateway-Event)
+
+**Verifiziert:** arian (UI) ↔ frieda (Skript am Gateway): Nachrichten kommen in beide Richtungen live an; History übersteht Reload; Nicht-Mitglied bekommt 404 auf Lesen UND Senden (serverseitig). Build/Lint grün.
+
 ## Nächste Phase
 
-**Phase 4 – Basis-Text-Chat (noch unverschlüsselt):** Nachrichten senden/empfangen/History über Gateway + REST, bewusst Klartext zur Pipeline-Verifikation. Verifikation: Nachricht kommt in Echtzeit bei allen Mitgliedern an, History lädt nach Reload.
+**Phase 5 – Rollen & Berechtigungen:** Rollenverwaltung, Berechtigungs-Bitfield, Zuweisung pro Mitglied, serverseitige Durchsetzung. Verifikation: Nutzer ohne Schreibrecht wird vom Server blockiert, nicht nur von der UI versteckt.
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 

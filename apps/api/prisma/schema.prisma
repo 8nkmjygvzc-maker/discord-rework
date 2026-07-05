@@ -1,5 +1,5 @@
 // Datenmodell (wächst phasenweise per Migration):
-// Phase 1: User, RefreshToken – Phase 3: Server, Membership, Channel
+// Phase 1: User, RefreshToken – Phase 3: Server, Membership, Channel – Phase 4: Message
 
 generator client {
   provider = "prisma-client-js"
@@ -24,6 +24,7 @@ model User {
   refreshTokens RefreshToken[]
   ownedServers  Server[]       @relation("OwnedServers")
   memberships   Membership[]
+  messages      Message[]
 }
 
 model Server {
@@ -71,7 +72,25 @@ model Channel {
   isPrivate Boolean     @default(false)
   createdAt DateTime    @default(now())
 
+  messages Message[]
+
   @@index([serverId])
+}
+
+// Phase 4: bewusst noch Klartext (`content`), um die Echtzeit-Pipeline zu
+// verifizieren. Phase 6 ersetzt content durch ciphertext + nonce (E2EE).
+model Message {
+  id        String    @id @default(uuid())
+  channelId String
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User      @relation(fields: [senderId], references: [id])
+  content   String
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+
+  // History-Abfragen laden „die letzten N vor Zeitpunkt X eines Kanals“.
+  @@index([channelId, createdAt])
 }
 
 // Refresh-Tokens werden nur als SHA-256-Hash gespeichert: Ein DB-Leak allein
