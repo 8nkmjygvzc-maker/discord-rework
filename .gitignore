@@ -1,0 +1,22 @@
+# Abhängigkeiten
+node_modules/
+
+# Build-Ausgaben
+dist/
+*.tsbuildinfo
+
+# Umgebungsvariablen – niemals committen (enthalten Secrets)
+.env
+.env.local
+.env.*.local
+
+# Logs & Betriebssystem
+*.log
+.DS_Store
+Thumbs.db
+
+# Test-Coverage
+coverage/
+
+# Lokale Tool-Konfiguration (enthält maschinenspezifische Pfade)
+.claude/

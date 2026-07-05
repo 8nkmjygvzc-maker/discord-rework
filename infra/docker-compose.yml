@@ -1,0 +1,56 @@
+# Infrastruktur für die lokale Entwicklung: PostgreSQL, Redis, MinIO.
+# Start:  docker compose -f infra/docker-compose.yml up -d
+# Die ${VAR:-default}-Werte greifen, wenn keine .env vorhanden ist –
+# für Produktivbetrieb müssen eigene Passwörter gesetzt werden.
+name: parley
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-parley}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-parley_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-parley}
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-parley}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-parley}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-parley_dev_password}
+    ports:
+      - '9000:9000' # S3-API
+      - '9001:9001' # Web-Konsole
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
