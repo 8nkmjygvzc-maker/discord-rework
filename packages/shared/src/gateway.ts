@@ -38,7 +38,17 @@ export enum GatewayCloseCode {
 }
 
 /** Alle Dispatch-Event-Namen. Wächst mit den Phasen (Messages, Typing, …). */
-export type GatewayEventType = 'READY' | 'PRESENCE_UPDATE';
+export type GatewayEventType =
+  | 'READY'
+  | 'PRESENCE_UPDATE'
+  // Phase 3 – Server & Kanäle (gezielt an Server-Mitglieder):
+  | 'SERVER_UPDATE'
+  | 'SERVER_DELETE'
+  | 'SERVER_MEMBER_ADD'
+  | 'SERVER_MEMBER_REMOVE'
+  | 'CHANNEL_CREATE'
+  | 'CHANNEL_UPDATE'
+  | 'CHANNEL_DELETE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {
@@ -74,4 +84,21 @@ export interface ReadyPayload {
 export interface PresenceUpdatePayload {
   user: PresenceUser;
   online: boolean;
+}
+
+// --- Payloads der Server-/Kanal-Events (Phase 3) ---
+// Die Typen ServerSummary/ServerMember/ChannelInfo kommen aus ./servers.
+
+export interface ServerDeletePayload {
+  serverId: string;
+}
+
+export interface ServerMemberRemovePayload {
+  serverId: string;
+  userId: string;
+}
+
+export interface ChannelDeletePayload {
+  serverId: string;
+  channelId: string;
 }

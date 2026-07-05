@@ -39,6 +39,25 @@ Protokolldefinition (Opcodes, Events, Payloads): `packages/shared/src/gateway.ts
 Access-Token: JWT, 15 min, gehört in den `Authorization: Bearer`-Header.
 Refresh-Token: httpOnly-Cookie `parley_refresh` (Pfad `/api/auth`), 30 Tage, rotierend.
 
+## Endpoints (Phase 3 – alle mit Bearer-Auth)
+
+| Methode | Pfad                        | Zweck                                             |
+| ------- | --------------------------- | ------------------------------------------------- |
+| POST    | `/api/servers`              | Server anlegen (Ersteller = Owner, Standardkanal) |
+| GET     | `/api/servers`              | eigene Server                                     |
+| GET     | `/api/servers/:id`          | Details (Kanäle + Mitglieder, nur Mitglieder)     |
+| PATCH   | `/api/servers/:id`          | umbenennen/Icon (nur Owner)                       |
+| DELETE  | `/api/servers/:id`          | löschen (nur Owner)                               |
+| POST    | `/api/servers/:id/join`     | beitreten per Server-ID (Invites: Phase 12)       |
+| POST    | `/api/servers/:id/leave`    | verlassen (Owner nicht)                           |
+| POST    | `/api/servers/:id/channels` | Kanal anlegen (nur Owner)                         |
+| PATCH   | `/api/channels/:id`         | Kanal umbenennen/verschieben (nur Owner)          |
+| DELETE  | `/api/channels/:id`         | Kanal löschen (nur Owner)                         |
+
+Änderungen werden zusätzlich als Gateway-Events an die betroffenen Mitglieder
+dispatcht (`SERVER_*`, `CHANNEL_*` – gezielt über `publishDispatch(..., userIds)`).
+„Nur Owner“ gilt bis Phase 5 – dann übernimmt das Rollen-/Berechtigungssystem.
+
 ## Datenbank
 
 ```bash

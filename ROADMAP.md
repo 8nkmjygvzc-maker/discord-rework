@@ -39,4 +39,6 @@
 
 ## Ideen aus der Entwicklung
 
-- (hier während der Phasen ergänzen)
+- **Ownership-Übergabe:** Der Owner kann seinen Server aktuell nur löschen, nicht übergeben; „Server verlassen“ ist für Owner gesperrt. Übergabe-Flow sinnvoll ab Phase 13 (Moderation)
+- **Beitritt per Server-ID** (Phase 3) ist bewusst primitiv – jeder mit der ID kann beitreten. Phase 12 ersetzt das durch Invite-Links mit Ablauf/Limit; danach den offenen Join-Endpunkt absichern oder entfernen
+- **Presence global statt gescoped:** PRESENCE_UPDATE geht an alle verbundenen Clients, nicht nur an gemeinsame Server-Mitglieder/Freunde – ab Phase 7 auf sichtbarkeitsbasiertes Routing umstellen (Grundlage `publishDispatch(..., targetUserIds)` existiert seit Phase 3)

@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 2 abgeschlossen (05.07.2026)
+## Status: Phase 3 abgeschlossen (05.07.2026)
 
 ## Erledigt
 
@@ -42,9 +42,18 @@
 
 **Verifiziert:** Protokoll-Test-Skript (2 Nutzer: READY-Snapshot, gegenseitige PRESENCE_UPDATEs online/offline, HEARTBEAT_ACK, Close 4001 bei ungültigem Token) – alle Checks grün. UI-Test im Browser: „Gerade online“-Panel zeigt zweiten Nutzer in Echtzeit beim Verbinden/Trennen. Rate-Limit: 12 Login-Versuche → 2× HTTP 429. Build/Tests/Lint grün.
 
+### Phase 3 – Server & Kanäle (05.07.2026)
+
+- **Prisma:** Modelle `Server`, `Membership` (Composite-Key userId+serverId), `Channel` (+ `ChannelType`-Enum, serverId nullable für DMs ab Phase 7); Migration `servers_channels`
+- **REST** (`apps/api/src/servers/`): Server-CRUD, Beitritt per Server-ID (Invites folgen Phase 12), verlassen (Owner gesperrt), Kanal-CRUD; Verwaltung bis Phase 5 Owner-only; 404 statt 403 für Nicht-Mitglieder (kein Existenz-Leak), 409 bei Doppel-Beitritt
+- **Gateway erweitert:** `publishDispatch(t, d, targetUserIds?)` – Events gehen gezielt an Server-Mitglieder (`SERVER_UPDATE/DELETE`, `SERVER_MEMBER_ADD/REMOVE`, `CHANNEL_CREATE/UPDATE/DELETE`)
+- **Frontend:** Discord-artiges Layout (Server-Leiste → Kanal-Sidebar → Hauptbereich → Mitglieder-Panel), Server/Kanal-Dialoge, „ID kopieren“-Button zum Einladen, Mitglieder-Panel mit Live-Online-Status, Profil als Unteransicht (⚙ → Zurück); `GatewayClient` mit generischem `onDispatch`, Store-Verdrahtung in `lib/gatewayConnection.ts`; nach Reconnect wird der REST-Stand neu geladen (verpasste Events)
+
+**Verifiziert:** UI: Server „Arians Treffpunkt“ + Kanal „projekte“ angelegt; frieda tritt per ID bei und erscheint OHNE Reload im Mitglieder-Panel (SERVER_MEMBER_ADD). API: Details vor Beitritt 404, Beitritt 201, Doppel-Beitritt 409, Kanal anlegen als Nicht-Owner 403, Server löschen als Nicht-Owner 403 – serverseitig durchgesetzt. Build/Tests/Lint grün.
+
 ## Nächste Phase
 
-**Phase 3 – Server & Kanäle:** CRUD für Server und Text-Kanäle, Mitgliederliste, beitreten/verlassen. Verifikation: Server + Kanal anlegen, zweiter Nutzer tritt bei – sichtbar in der UI.
+**Phase 4 – Basis-Text-Chat (noch unverschlüsselt):** Nachrichten senden/empfangen/History über Gateway + REST, bewusst Klartext zur Pipeline-Verifikation. Verifikation: Nachricht kommt in Echtzeit bei allen Mitgliedern an, History lädt nach Reload.
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 

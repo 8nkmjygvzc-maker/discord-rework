@@ -3,7 +3,12 @@ import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
 
-export default function ProfilePage() {
+interface ProfilePageProps {
+  /** Zurück zur Hauptansicht (gesetzt, sobald es eine gibt – ab Phase 3). */
+  onBack?: () => void;
+}
+
+export default function ProfilePage({ onBack }: ProfilePageProps) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const updateProfile = useAuthStore((s) => s.updateProfile);
@@ -42,6 +47,15 @@ export default function ProfilePage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-900 text-zinc-100">
       <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-800 p-8 shadow-xl">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-4 text-sm text-zinc-400 transition hover:text-zinc-200"
+          >
+            ← Zurück
+          </button>
+        )}
         <div className="flex items-center gap-4">
           {/* Platzhalter-Avatar: Initiale auf Farbfläche; Uploads kommen in Phase 8 */}
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-600 text-2xl font-bold">

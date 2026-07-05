@@ -72,9 +72,13 @@ export class GatewayService implements OnModuleDestroy {
     this.logger.log('Gateway lauscht auf /gateway');
   }
 
-  /** Publiziert ein Dispatch-Event an alle Gateway-Instanzen (inkl. dieser). */
-  async publishDispatch<T>(t: GatewayEventType, d: T): Promise<void> {
-    await this.redis.client.publish(DISPATCH_CHANNEL, JSON.stringify({ t, d }));
+  /**
+   * Publiziert ein Dispatch-Event an alle Gateway-Instanzen (inkl. dieser).
+   * Ohne targetUserIds geht das Event an ALLE verbundenen Clients (z. B.
+   * Presence); mit targetUserIds nur an die Verbindungen dieser Nutzer.
+   */
+  async publishDispatch<T>(t: GatewayEventType, d: T, targetUserIds?: string[]): Promise<void> {
+    await this.redis.client.publish(DISPATCH_CHANNEL, JSON.stringify({ t, d, u: targetUserIds }));
   }
 
   private onConnection(socket: WebSocket): void {
@@ -185,20 +189,21 @@ export class GatewayService implements OnModuleDestroy {
     }
   }
 
-  /** Verteilt ein über Redis empfangenes Event an alle lokalen, identifizierten Clients. */
+  /** Verteilt ein über Redis empfangenes Event an die lokalen, identifizierten Clients. */
   private onRedisDispatch(message: string): void {
-    let event: { t: GatewayEventType; d: unknown };
+    let event: { t: GatewayEventType; d: unknown; u?: string[] };
     try {
-      event = JSON.parse(message) as { t: GatewayEventType; d: unknown };
+      event = JSON.parse(message) as { t: GatewayEventType; d: unknown; u?: string[] };
     } catch {
       this.logger.warn('Ungültiges Pub/Sub-Event verworfen');
       return;
     }
+    const targets = event.u ? new Set(event.u) : null;
     const envelope: GatewayMessage = { op: GatewayOpcode.Dispatch, t: event.t, d: event.d };
     for (const conn of this.connections) {
-      if (conn.user && conn.socket.readyState === WebSocket.OPEN) {
-        this.send(conn.socket, envelope);
-      }
+      if (!conn.user || conn.socket.readyState !== WebSocket.OPEN) continue;
+      if (targets && !targets.has(conn.user.id)) continue;
+      this.send(conn.socket, envelope);
     }
   }
 

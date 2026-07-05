@@ -1,11 +1,10 @@
 import {
   GatewayCloseCode,
+  GatewayEventType,
   GatewayMessage,
   GatewayOpcode,
   HelloPayload,
   IdentifyPayload,
-  PresenceUpdatePayload,
-  ReadyPayload,
 } from '@parley/shared';
 
 export interface GatewayHandlers {
@@ -15,8 +14,8 @@ export interface GatewayHandlers {
    * null = keine Sitzung mehr → Client stoppt.
    */
   getToken: (forceRefresh: boolean) => Promise<string | null>;
-  onReady: (d: ReadyPayload) => void;
-  onPresenceUpdate: (d: PresenceUpdatePayload) => void;
+  /** Alle Dispatch-Events (READY, PRESENCE_UPDATE, CHANNEL_CREATE, …). */
+  onDispatch: (t: GatewayEventType, d: unknown) => void;
   onConnectionChange: (connected: boolean) => void;
 }
 
@@ -85,10 +84,8 @@ export class GatewayClient {
         if (msg.t === 'READY') {
           this.reconnectAttempts = 0;
           this.handlers.onConnectionChange(true);
-          this.handlers.onReady(msg.d as ReadyPayload);
-        } else if (msg.t === 'PRESENCE_UPDATE') {
-          this.handlers.onPresenceUpdate(msg.d as PresenceUpdatePayload);
         }
+        if (msg.t) this.handlers.onDispatch(msg.t, msg.d);
         return;
     }
   }

@@ -1,13 +1,15 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from './store/auth';
-import { usePresenceStore } from './store/presence';
+import { gateway } from './lib/gatewayConnection';
 import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
+import MainPage from './pages/MainPage';
 
 export default function App() {
   const user = useAuthStore((s) => s.user);
   const initialized = useAuthStore((s) => s.initialized);
   const initSession = useAuthStore((s) => s.initSession);
+  const [view, setView] = useState<'main' | 'profile'>('main');
 
   // Beim Laden einmal versuchen, die Sitzung über das Refresh-Cookie wiederherzustellen.
   useEffect(() => {
@@ -18,9 +20,8 @@ export default function App() {
   const userId = user?.id ?? null;
   useEffect(() => {
     if (!userId) return;
-    const { connect, disconnect } = usePresenceStore.getState();
-    connect();
-    return disconnect;
+    gateway.connect();
+    return gateway.disconnect;
   }, [userId]);
 
   if (!initialized) {
@@ -31,5 +32,10 @@ export default function App() {
     );
   }
 
-  return user ? <ProfilePage /> : <AuthPage />;
+  if (!user) return <AuthPage />;
+  return view === 'profile' ? (
+    <ProfilePage onBack={() => setView('main')} />
+  ) : (
+    <MainPage onOpenProfile={() => setView('profile')} />
+  );
 }
