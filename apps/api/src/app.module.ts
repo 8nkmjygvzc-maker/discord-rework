@@ -9,6 +9,7 @@ import { GatewayModule } from './gateway/gateway.module';
 import { ServersModule } from './servers/servers.module';
 import { MessagesModule } from './messages/messages.module';
 import { RolesModule } from './roles/roles.module';
+import { KeysModule } from './keys/keys.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { RolesModule } from './roles/roles.module';
     ServersModule,
     MessagesModule,
     RolesModule,
+    KeysModule,
   ],
 })
 export class AppModule {}

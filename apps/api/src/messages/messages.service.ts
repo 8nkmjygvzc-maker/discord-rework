@@ -1,6 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Message } from '@prisma/client';
-import { MessageHistoryResponse, MessageInfo, Permissions } from '@parley/shared';
+import { Message, Prisma } from '@prisma/client';
+import {
+  EncryptedMessageHeader,
+  MessageHistoryResponse,
+  MessageInfo,
+  Permissions,
+} from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { PermissionsService } from '../roles/permissions.service';
@@ -25,8 +30,17 @@ export class MessagesService {
       userId,
       Permissions.SendMessages,
     );
+    // Seit Phase 6 erreicht den Server nur noch Ciphertext – gespeichert und
+    // weitergereicht wird er unverändert, lesen kann ihn nur ein Mitglied mit
+    // dem passenden Sender-Key.
     const message = await this.prisma.message.create({
-      data: { channelId, senderId: userId, content: dto.content },
+      data: {
+        channelId,
+        senderId: userId,
+        ciphertext: dto.ciphertext,
+        nonce: dto.nonce,
+        header: dto.header as unknown as Prisma.InputJsonValue,
+      },
       include: { sender: { select: { username: true } } },
     });
     const info = toMessageInfo(message);
@@ -95,7 +109,9 @@ function toMessageInfo(message: MessageWithSender): MessageInfo {
     channelId: message.channelId,
     senderId: message.senderId,
     senderUsername: message.sender.username,
-    content: message.content,
+    ciphertext: message.ciphertext,
+    nonce: message.nonce,
+    header: message.header as unknown as EncryptedMessageHeader,
     createdAt: message.createdAt.toISOString(),
     editedAt: message.editedAt?.toISOString() ?? null,
   };

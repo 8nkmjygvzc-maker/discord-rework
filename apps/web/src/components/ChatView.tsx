@@ -14,6 +14,7 @@ export default function ChatView({ channel }: ChatViewProps) {
   const user = useAuthStore((s) => s.user);
   const myPermissions = useServersStore((s) => s.selectedServer?.myPermissions ?? '0');
   const chan = useMessagesStore((s) => s.byChannel[channel.id]);
+  const decrypted = useMessagesStore((s) => s.decrypted);
   const loadHistory = useMessagesStore((s) => s.loadHistory);
   const loadOlder = useMessagesStore((s) => s.loadOlder);
   const sendMessage = useMessagesStore((s) => s.sendMessage);
@@ -61,6 +62,12 @@ export default function ChatView({ channel }: ChatViewProps) {
       <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
         <span className="text-zinc-500">#</span>
         <span className="font-semibold">{channel.name}</span>
+        <span
+          className="ml-auto text-xs text-zinc-500"
+          title="Nachrichten werden auf deinem Gerät ver- und entschlüsselt – der Server sieht nur Ciphertext."
+        >
+          🔒 Ende-zu-Ende-verschlüsselt
+        </span>
       </header>
 
       <div
@@ -117,9 +124,18 @@ export default function ChatView({ channel }: ChatViewProps) {
                       </span>
                     </p>
                   )}
-                  <p className="text-sm break-words whitespace-pre-wrap text-zinc-300">
-                    {msg.content}
-                  </p>
+                  {decrypted[msg.id] !== undefined ? (
+                    <p className="text-sm break-words whitespace-pre-wrap text-zinc-300">
+                      {decrypted[msg.id]}
+                    </p>
+                  ) : (
+                    <p
+                      className="text-sm text-zinc-500 italic"
+                      title="Der Schlüssel für diese Nachricht liegt (noch) nicht vor – z. B. weil sie vor deinem Beitritt gesendet wurde."
+                    >
+                      🔒 Nachricht kann nicht entschlüsselt werden
+                    </p>
+                  )}
                 </div>
               </li>
             );

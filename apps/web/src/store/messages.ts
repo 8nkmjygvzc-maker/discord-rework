@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { MessageHistoryResponse, MessageInfo } from '@parley/shared';
 import { useAuthStore } from './auth';
+import { useServersStore } from './servers';
+import { e2ee } from '../lib/e2ee';
 
 interface ChannelMessages {
   messages: MessageInfo[];
@@ -8,15 +10,23 @@ interface ChannelMessages {
   loaded: boolean;
 }
 
-/** Nachrichten pro Kanal; History wird beim Kanalwechsel einmal geladen. */
+/**
+ * Nachrichten pro Kanal. Seit Phase 6 kommen sie als Ciphertext an –
+ * `decrypted` hält die entschlüsselten Texte NUR IM SPEICHER (nie
+ * persistiert). Fehlt der Sender-Key noch, bleibt der Eintrag aus und die
+ * UI zeigt einen Platzhalter; nach jedem Schlüssel-Umschlag wird erneut
+ * versucht (retryUndecrypted).
+ */
 interface MessagesState {
   byChannel: Record<string, ChannelMessages>;
+  decrypted: Record<string, string>;
 
   loadHistory: (channelId: string) => Promise<void>;
   loadOlder: (channelId: string) => Promise<void>;
   sendMessage: (channelId: string, content: string) => Promise<void>;
 
   handleMessageCreate: (message: MessageInfo) => void;
+  retryUndecrypted: () => void;
   reset: () => void;
 }
 
@@ -37,6 +47,7 @@ function appendMessage(state: ChannelMessages, message: MessageInfo): ChannelMes
 
 export const useMessagesStore = create<MessagesState>()((set, get) => ({
   byChannel: {},
+  decrypted: {},
 
   loadHistory: async (channelId) => {
     if (get().byChannel[channelId]?.loaded) return;
@@ -47,6 +58,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
         [channelId]: { messages: res.messages, hasMore: res.hasMore, loaded: true },
       },
     }));
+    void decryptBatch(res.messages, set, get);
   },
 
   loadOlder: async (channelId) => {
@@ -68,24 +80,62 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
         },
       };
     });
+    void decryptBatch(res.messages, set, get);
   },
 
   sendMessage: async (channelId, content) => {
+    const server = useServersStore.getState().selectedServer;
+    if (!server || !server.channels.some((c) => c.id === channelId)) {
+      throw new Error('Kanal gehört nicht zum ausgewählten Server');
+    }
+    // Verschlüsseln (verteilt bei Bedarf vorher den eigenen Sender-Key).
+    const payload = await e2ee.encryptForChannel(
+      channelId,
+      server.id,
+      server.members.map((m) => m.userId),
+      content,
+    );
     const message = await authFetch<MessageInfo>(`/api/channels/${channelId}/messages`, {
       method: 'POST',
-      body: { content },
+      body: payload,
     });
-    // Sofort anzeigen statt auf das eigene Gateway-Event zu warten.
+    // Eigenen Klartext direkt eintragen – kein Entschlüsselungs-Umweg nötig.
+    set((s) => ({ decrypted: { ...s.decrypted, [message.id]: content } }));
     get().handleMessageCreate(message);
   },
 
-  handleMessageCreate: (message) =>
+  handleMessageCreate: (message) => {
     set((s) => {
       const chan = s.byChannel[message.channelId];
       // Kanal nie geöffnet → nichts tun, die History lädt später ohnehin frisch.
       if (!chan?.loaded) return {};
       return { byChannel: { ...s.byChannel, [message.channelId]: appendMessage(chan, message) } };
-    }),
+    });
+    void decryptBatch([message], set, get);
+  },
 
-  reset: () => set({ byChannel: {} }),
+  /** Nach neuen Sender-Keys: alles noch Unentschlüsselte erneut versuchen. */
+  retryUndecrypted: () => {
+    const { byChannel } = get();
+    const pending = Object.values(byChannel).flatMap((chan) => chan.messages);
+    void decryptBatch(pending, set, get);
+  },
+
+  reset: () => set({ byChannel: {}, decrypted: {} }),
 }));
+
+type Set = (fn: (s: MessagesState) => Partial<MessagesState>) => void;
+type Get = () => MessagesState;
+
+/** Entschlüsselt fehlende Nachrichten und trägt Ergebnisse gesammelt ein. */
+async function decryptBatch(messages: MessageInfo[], set: Set, get: Get): Promise<void> {
+  const results: Record<string, string> = {};
+  for (const message of messages) {
+    if (get().decrypted[message.id] !== undefined) continue;
+    const plaintext = await e2ee.decryptMessage(message);
+    if (plaintext !== null) results[message.id] = plaintext;
+  }
+  if (Object.keys(results).length > 0) {
+    set((s) => ({ decrypted: { ...s.decrypted, ...results } }));
+  }
+}

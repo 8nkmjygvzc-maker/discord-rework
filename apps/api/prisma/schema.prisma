@@ -25,6 +25,38 @@ model User {
   ownedServers  Server[]       @relation("OwnedServers")
   memberships   Membership[]
   messages      Message[]
+  device        Device?
+  envelopesFrom KeyEnvelope[]  @relation("EnvelopesFrom")
+  envelopesTo   KeyEnvelope[]  @relation("EnvelopesTo")
+}
+
+// Phase 6: Öffentliche Schlüssel eines Geräts. v1 = genau EIN Gerät pro
+// Account (userId unique); Multi-Device steht in der ROADMAP. Private
+// Schlüssel existieren nur im Client (IndexedDB) – nie hier.
+model Device {
+  id                     String   @id @default(uuid())
+  userId                 String   @unique
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  identityKey            String
+  signedPreKey           String
+  signedPreKeySignature  String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+// Phase 6: Mailbox für Ende-zu-Ende-verschlüsselte Schlüssel-Umschläge
+// (Sender-Key-Verteilung). Der Server sieht nur den verschlüsselten Payload;
+// der Empfänger löscht den Umschlag nach Verarbeitung (Ack).
+model KeyEnvelope {
+  id         String   @id @default(uuid())
+  fromUserId String
+  from       User     @relation("EnvelopesFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId   String
+  to         User     @relation("EnvelopesTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  @@index([toUserId, createdAt])
 }
 
 model Server {
@@ -109,17 +141,20 @@ model Channel {
   @@index([serverId])
 }
 
-// Phase 4: bewusst noch Klartext (`content`), um die Echtzeit-Pipeline zu
-// verifizieren. Phase 6 ersetzt content durch ciphertext + nonce (E2EE).
+// Phase 6: Ende-zu-Ende-verschlüsselt. Der Server speichert nur Ciphertext,
+// Nonce und den Klartext-Header (keyId/Iteration/Signatur des Sender-Keys) –
+// Inhalte kann er prinzipbedingt nicht lesen.
 model Message {
-  id        String    @id @default(uuid())
-  channelId String
-  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  senderId  String
-  sender    User      @relation(fields: [senderId], references: [id])
-  content   String
-  createdAt DateTime  @default(now())
-  editedAt  DateTime?
+  id         String    @id @default(uuid())
+  channelId  String
+  channel    Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User      @relation(fields: [senderId], references: [id])
+  ciphertext String
+  nonce      String
+  header     Json
+  createdAt  DateTime  @default(now())
+  editedAt   DateTime?
 
   // History-Abfragen laden „die letzten N vor Zeitpunkt X eines Kanals“.
   @@index([channelId, createdAt])

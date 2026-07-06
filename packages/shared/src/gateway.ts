@@ -55,7 +55,9 @@ export type GatewayEventType =
   | 'ROLE_CREATE'
   | 'ROLE_UPDATE'
   | 'ROLE_DELETE'
-  | 'MEMBER_ROLES_UPDATE';
+  | 'MEMBER_ROLES_UPDATE'
+  // Phase 6 – E2EE: Schlüssel-Umschlag (Sender-Key-Verteilung) zugestellt.
+  | 'KEY_ENVELOPE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {
