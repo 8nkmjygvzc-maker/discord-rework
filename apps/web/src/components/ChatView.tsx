@@ -7,10 +7,12 @@ import { ApiError } from '../lib/api';
 
 interface ChatViewProps {
   channel: ChannelInfo;
+  /** DM-Modus (Phase 7): kein Rechte-Gate, @-Präfix statt #. */
+  dm?: boolean;
 }
 
-/** Nachrichtenliste + Eingabezeile für den ausgewählten Textkanal. */
-export default function ChatView({ channel }: ChatViewProps) {
+/** Nachrichtenliste + Eingabezeile für den ausgewählten Text- oder DM-Kanal. */
+export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const user = useAuthStore((s) => s.user);
   const myPermissions = useServersStore((s) => s.selectedServer?.myPermissions ?? '0');
   const chan = useMessagesStore((s) => s.byChannel[channel.id]);
@@ -60,7 +62,7 @@ export default function ChatView({ channel }: ChatViewProps) {
   return (
     <main className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
-        <span className="text-zinc-500">#</span>
+        <span className="text-zinc-500">{dm ? '@' : '#'}</span>
         <span className="font-semibold">{channel.name}</span>
         <span
           className="ml-auto text-xs text-zinc-500"
@@ -87,7 +89,9 @@ export default function ChatView({ channel }: ChatViewProps) {
         )}
         {chan?.loaded && messages.length === 0 && (
           <p className="mt-8 text-center text-sm text-zinc-500">
-            Noch keine Nachrichten in #{channel.name} – schreib die erste!
+            {dm
+              ? `Noch keine Nachrichten mit @${channel.name} – schreib die erste!`
+              : `Noch keine Nachrichten in #${channel.name} – schreib die erste!`}
           </p>
         )}
         <ul className="space-y-3">
@@ -150,12 +154,12 @@ export default function ChatView({ channel }: ChatViewProps) {
           </p>
         )}
         {/* Die UI blendet nur aus – blockiert wird serverseitig (403). */}
-        {hasPermission(permissionsFromString(myPermissions), Permissions.SendMessages) ? (
+        {dm || hasPermission(permissionsFromString(myPermissions), Permissions.SendMessages) ? (
           <input
             className="w-full rounded-lg border border-zinc-600 bg-zinc-900 px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Nachricht an #${channel.name}`}
+            placeholder={`Nachricht an ${dm ? '@' : '#'}${channel.name}`}
             maxLength={4000}
           />
         ) : (

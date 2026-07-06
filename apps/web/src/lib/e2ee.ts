@@ -66,7 +66,8 @@ interface PeerSessions {
 
 interface OwnSenderKeyRecord {
   key: OwnSenderKey;
-  serverId: string;
+  /** null bei DM-Kanälen – Rotations-Flags gelten pro Server (Phase 7). */
+  serverId: string | null;
   createdAt: number;
   /** Wer den Schlüssel schon hat (Wert = Identitätsschlüssel des Empfängers). */
   distributedTo: Record<string, string>;
@@ -194,19 +195,23 @@ export const e2ee = {
   },
 
   /**
-   * Verschlüsselt eine Kanal-Nachricht. Verteilt vorher den eigenen
-   * Sender-Key an alle Mitglieder, die ihn noch nicht haben.
+   * Verschlüsselt eine Kanal-Nachricht (Server-Kanal oder DM, Phase 7).
+   * Verteilt vorher den eigenen Sender-Key an alle Mitglieder, die ihn noch
+   * nicht haben. `serverId` ist null bei DMs – dort gibt es keine
+   * Mitglieder-Fluktuation und damit keine Rotations-Flags.
    */
   async encryptForChannel(
     channelId: string,
-    serverId: string,
+    serverId: string | null,
     memberIds: string[],
     plaintext: string,
   ): Promise<SendMessageRequest> {
     const database = await ensureReady();
     return withLock(async () => {
       let record = await database.get<OwnSenderKeyRecord>('ownSenderKeys', channelId);
-      const rotateAt = (await database.get<number>('kv', `rotate:${serverId}`)) ?? 0;
+      const rotateAt = serverId
+        ? ((await database.get<number>('kv', `rotate:${serverId}`)) ?? 0)
+        : 0;
       if (!record || record.createdAt < rotateAt) {
         record = await createOwnSenderKeyRecord(database, channelId, serverId);
       }
@@ -246,7 +251,7 @@ export const e2ee = {
 async function createOwnSenderKeyRecord(
   database: CryptoDb,
   channelId: string,
-  serverId: string,
+  serverId: string | null,
 ): Promise<OwnSenderKeyRecord> {
   const key = createSenderKey();
   // Schnappschuss des Anfangszustands für die EIGENEN Nachrichten – der

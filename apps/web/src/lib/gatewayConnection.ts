@@ -1,6 +1,8 @@
 import type {
+  DmChannelInfo,
   KeyEnvelopeInfo,
   MessageInfo,
+  PresenceSyncPayload,
   PresenceUpdatePayload,
   ReadyPayload,
   ServerMemberRemovePayload,
@@ -11,6 +13,8 @@ import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { useServersStore } from '../store/servers';
 import { useMessagesStore } from '../store/messages';
+import { useFriendsStore } from '../store/friends';
+import { useDmsStore } from '../store/dms';
 
 /**
  * Die eine Gateway-Verbindung des Tabs. Verteilt Dispatch-Events an die
@@ -26,10 +30,21 @@ const client = new GatewayClient({
         // Nach (Re-)Connect den REST-Stand nachziehen – Events, die während
         // einer Trennung passiert sind, sind unwiederbringlich verpasst.
         void useServersStore.getState().loadServers();
+        void useFriendsStore.getState().loadFriends();
+        void useDmsStore.getState().loadDms();
         void initCrypto();
         return;
       case 'PRESENCE_UPDATE':
         usePresenceStore.getState().handlePresenceUpdate(d as PresenceUpdatePayload);
+        return;
+      case 'PRESENCE_SYNC':
+        usePresenceStore.getState().handlePresenceSync(d as PresenceSyncPayload);
+        return;
+      case 'FRIENDS_UPDATE':
+        void useFriendsStore.getState().loadFriends();
+        return;
+      case 'DM_CHANNEL_CREATE':
+        useDmsStore.getState().handleDmCreate((d as { channel: DmChannelInfo }).channel);
         return;
       case 'MESSAGE_CREATE':
         useMessagesStore.getState().handleMessageCreate((d as { message: MessageInfo }).message);
@@ -86,5 +101,7 @@ export const gateway = {
     usePresenceStore.getState().handleDisconnected();
     useServersStore.getState().reset();
     useMessagesStore.getState().reset();
+    useFriendsStore.getState().reset();
+    useDmsStore.getState().reset();
   },
 };

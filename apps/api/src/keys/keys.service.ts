@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import {
   cryptoReady,
   DeviceKeyBundle,
@@ -9,6 +15,7 @@ import {
 import { KeyEnvelope, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { VisibilityService } from '../gateway/visibility.service';
 import { RegisterKeysDto } from './dto/register-keys.dto';
 import { SendEnvelopeDto } from './dto/send-envelope.dto';
 
@@ -27,6 +34,7 @@ export class KeysService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
+    private readonly visibility: VisibilityService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -79,6 +87,13 @@ export class KeysService implements OnModuleInit {
   async sendEnvelope(fromUserId: string, dto: SendEnvelopeDto): Promise<void> {
     if (JSON.stringify(dto.payload).length > MAX_ENVELOPE_BYTES) {
       throw new BadRequestException('Umschlag ist zu groß');
+    }
+    // Seit Phase 7: Umschläge nur innerhalb des Sichtbarkeitskreises (Freunde,
+    // gemeinsame Server, bestehende DMs) – kein Zustellen an beliebige Fremde.
+    if (!(await this.visibility.canSee(fromUserId, dto.toUserId))) {
+      throw new ForbiddenException(
+        'Schlüssel-Umschläge nur an Freunde oder Mitglieder gemeinsamer Server',
+      );
     }
     const recipient = await this.prisma.device.findUnique({ where: { userId: dto.toUserId } });
     if (!recipient) throw new NotFoundException('Empfänger hat keine Schlüssel registriert');

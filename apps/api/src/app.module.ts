@@ -10,6 +10,8 @@ import { ServersModule } from './servers/servers.module';
 import { MessagesModule } from './messages/messages.module';
 import { RolesModule } from './roles/roles.module';
 import { KeysModule } from './keys/keys.module';
+import { FriendsModule } from './friends/friends.module';
+import { DmsModule } from './dms/dms.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { KeysModule } from './keys/keys.module';
     MessagesModule,
     RolesModule,
     KeysModule,
+    FriendsModule,
+    DmsModule,
   ],
 })
 export class AppModule {}

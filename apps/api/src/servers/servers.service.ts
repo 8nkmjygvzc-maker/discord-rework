@@ -16,6 +16,7 @@ import {
 } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { PresenceService } from '../gateway/presence.service';
 import { PermissionsService } from '../roles/permissions.service';
 import { toRoleInfo } from '../roles/roles.service';
 import { CreateServerDto } from './dto/create-server.dto';
@@ -33,6 +34,7 @@ export class ServersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
+    private readonly presence: PresenceService,
     private readonly permissions: PermissionsService,
   ) {}
 
@@ -142,11 +144,32 @@ export class ServersService {
       data: { userId, serverId },
       include: { user: { select: { username: true } }, roles: { select: { roleId: true } } },
     });
+    const memberIds = await this.memberIds(serverId);
     await this.gateway.publishDispatch(
       'SERVER_MEMBER_ADD',
       { serverId, member: toServerMember(membership) },
-      await this.memberIds(serverId),
+      memberIds,
     );
+
+    // Presence ist gescoped (Phase 7): Beitritt erweitert den Sichtbarkeits-
+    // kreis, der READY-Snapshot ist aber vorbei → dem Beitretenden die
+    // Online-Mitglieder nachliefern und ihn den Mitgliedern melden.
+    const memberSet = new Set(memberIds);
+    const onlineMembers = (await this.presence.getOnlineUsers()).filter((u) =>
+      memberSet.has(u.id),
+    );
+    const joiner = onlineMembers.find((u) => u.id === userId);
+    const others = onlineMembers.filter((u) => u.id !== userId);
+    if (others.length > 0) {
+      await this.gateway.publishDispatch('PRESENCE_SYNC', { users: others }, [userId]);
+    }
+    if (joiner) {
+      await this.gateway.publishDispatch(
+        'PRESENCE_UPDATE',
+        { user: joiner, online: true },
+        memberIds.filter((id) => id !== userId),
+      );
+    }
     return this.getServerDetails(serverId, userId);
   }
 

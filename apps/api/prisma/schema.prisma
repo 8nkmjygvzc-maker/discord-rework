@@ -1,5 +1,6 @@
 // Datenmodell (wächst phasenweise per Migration):
-// Phase 1: User, RefreshToken – Phase 3: Server, Membership, Channel – Phase 4: Message
+// Phase 1: User, RefreshToken – Phase 3: Server, Membership, Channel –
+// Phase 4: Message – Phase 6: Device, KeyEnvelope – Phase 7: Friendship, DmMember
 
 generator client {
   provider = "prisma-client-js"
@@ -21,13 +22,51 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  refreshTokens RefreshToken[]
-  ownedServers  Server[]       @relation("OwnedServers")
-  memberships   Membership[]
-  messages      Message[]
-  device        Device?
-  envelopesFrom KeyEnvelope[]  @relation("EnvelopesFrom")
-  envelopesTo   KeyEnvelope[]  @relation("EnvelopesTo")
+  refreshTokens   RefreshToken[]
+  ownedServers    Server[]       @relation("OwnedServers")
+  memberships     Membership[]
+  messages        Message[]
+  device          Device?
+  envelopesFrom   KeyEnvelope[]  @relation("EnvelopesFrom")
+  envelopesTo     KeyEnvelope[]  @relation("EnvelopesTo")
+  friendshipsFrom Friendship[]   @relation("FriendshipsFrom")
+  friendshipsTo   Friendship[]   @relation("FriendshipsTo")
+  dmMemberships   DmMember[]
+}
+
+// Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –
+// der Anfragende bei PENDING, der Blockierende bei BLOCKED. ACCEPTED gilt in
+// beide Richtungen. Zwischen zwei Nutzern kann es höchstens eine Zeile pro
+// Richtung geben; gegenseitige BLOCKED-Zeilen sind erlaubt.
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+model Friendship {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation("FriendshipsFrom", fields: [userId], references: [id], onDelete: Cascade)
+  friendId  String
+  friend    User             @relation("FriendshipsTo", fields: [friendId], references: [id], onDelete: Cascade)
+  status    FriendshipStatus @default(PENDING)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([userId, friendId])
+  @@index([friendId])
+}
+
+// Phase 7: Teilnehmer eines DM-Kanals (v1: genau zwei, Gruppen-DMs später).
+model DmMember {
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([channelId, userId])
+  @@index([userId])
 }
 
 // Phase 6: Öffentliche Schlüssel eines Geräts. v1 = genau EIN Gerät pro
@@ -134,9 +173,13 @@ model Channel {
   name      String
   position  Int         @default(0)
   isPrivate Boolean     @default(false)
+  // Kanonischer Schlüssel eines DM-Paars ("kleinereId:größereId") – der
+  // Unique-Index verhindert doppelte DM-Kanäle bei gleichzeitigem Öffnen.
+  dmKey     String?     @unique
   createdAt DateTime    @default(now())
 
-  messages Message[]
+  messages  Message[]
+  dmMembers DmMember[]
 
   @@index([serverId])
 }

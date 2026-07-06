@@ -17,6 +17,7 @@ import type { AccessTokenPayload } from '../auth/auth.service';
 import { RedisService } from '../redis/redis.service';
 import { parseGatewayMessage } from './gateway.util';
 import { PresenceService } from './presence.service';
+import { VisibilityService } from './visibility.service';
 
 /** Vom Server vorgegebenes Heartbeat-Intervall (via HELLO an den Client). */
 export const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -54,6 +55,7 @@ export class GatewayService implements OnModuleDestroy {
     private readonly jwt: JwtService,
     private readonly redis: RedisService,
     private readonly presence: PresenceService,
+    private readonly visibility: VisibilityService,
   ) {}
 
   /** Hängt das Gateway an den HTTP-Server der API (Aufruf aus main.ts nach listen()). */
@@ -140,7 +142,14 @@ export class GatewayService implements OnModuleDestroy {
     this.armHeartbeatDeadline(state);
 
     const wasOffline = await this.presence.markOnline(state.user);
-    const onlineUsers = await this.presence.getOnlineUsers();
+    // Presence ist seit Phase 7 gescoped: sichtbar sind nur Freunde,
+    // Mitglieder gemeinsamer Server und DM-Gesprächspartner – kein globaler
+    // Broadcast an Fremde mehr.
+    const visibleIds = await this.visibility.getVisibleUserIds(state.user.id);
+    const visible = new Set(visibleIds);
+    const onlineUsers = (await this.presence.getOnlineUsers()).filter(
+      (u) => u.id === state.user!.id || visible.has(u.id),
+    );
 
     this.send(state.socket, {
       op: GatewayOpcode.Dispatch,
@@ -149,10 +158,12 @@ export class GatewayService implements OnModuleDestroy {
     });
 
     if (wasOffline) {
-      await this.publishDispatch('PRESENCE_UPDATE', {
-        user: state.user,
-        online: true,
-      } satisfies PresenceUpdatePayload);
+      await this.publishDispatch(
+        'PRESENCE_UPDATE',
+        { user: state.user, online: true } satisfies PresenceUpdatePayload,
+        // Auch an sich selbst – andere eigene Tabs sollen den Wechsel sehen.
+        [...visibleIds, state.user.id],
+      );
     }
   }
 
@@ -182,10 +193,12 @@ export class GatewayService implements OnModuleDestroy {
 
     const wentOffline = await this.presence.markOffline(state.user);
     if (wentOffline) {
-      await this.publishDispatch('PRESENCE_UPDATE', {
-        user: state.user,
-        online: false,
-      } satisfies PresenceUpdatePayload);
+      const visibleIds = await this.visibility.getVisibleUserIds(state.user.id);
+      await this.publishDispatch(
+        'PRESENCE_UPDATE',
+        { user: state.user, online: false } satisfies PresenceUpdatePayload,
+        [...visibleIds, state.user.id],
+      );
     }
   }
 

@@ -57,7 +57,16 @@ export type GatewayEventType =
   | 'ROLE_DELETE'
   | 'MEMBER_ROLES_UPDATE'
   // Phase 6 – E2EE: Schlüssel-Umschlag (Sender-Key-Verteilung) zugestellt.
-  | 'KEY_ENVELOPE';
+  | 'KEY_ENVELOPE'
+  // Phase 7 – Freunde & DMs:
+  // Freundesliste hat sich geändert (Anfrage/Annahme/Entfernen/Block) → neu laden.
+  | 'FRIENDS_UPDATE'
+  // Neuer DM-Kanal; Payload ist pro Empfänger unterschiedlich (otherUser).
+  | 'DM_CHANNEL_CREATE'
+  // Additiver Presence-Nachschub, wenn der Sichtbarkeitskreis wächst
+  // (Server-Beitritt) – Presence ist seit Phase 7 auf Freunde + gemeinsame
+  // Server-Mitglieder beschränkt statt global.
+  | 'PRESENCE_SYNC';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {
@@ -93,6 +102,11 @@ export interface ReadyPayload {
 export interface PresenceUpdatePayload {
   user: PresenceUser;
   online: boolean;
+}
+
+/** Nachträglich sichtbar gewordene Online-Nutzer (additiv zum Client-Stand). */
+export interface PresenceSyncPayload {
+  users: PresenceUser[];
 }
 
 // --- Payloads der Server-/Kanal-Events (Phase 3) ---

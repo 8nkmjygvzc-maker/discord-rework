@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { MessageHistoryResponse, MessageInfo } from '@parley/shared';
 import { useAuthStore } from './auth';
 import { useServersStore } from './servers';
+import { dmMemberIds } from './dms';
 import { e2ee } from '../lib/e2ee';
 
 interface ChannelMessages {
@@ -84,17 +85,20 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
   },
 
   sendMessage: async (channelId, content) => {
+    // Kontext bestimmen: Kanal des ausgewählten Servers oder eigener DM-Kanal.
     const server = useServersStore.getState().selectedServer;
-    if (!server || !server.channels.some((c) => c.id === channelId)) {
-      throw new Error('Kanal gehört nicht zum ausgewählten Server');
+    let serverId: string | null = null;
+    let memberIds: string[];
+    if (server?.channels.some((c) => c.id === channelId)) {
+      serverId = server.id;
+      memberIds = server.members.map((m) => m.userId);
+    } else {
+      const dm = dmMemberIds(channelId);
+      if (!dm) throw new Error('Kanal nicht gefunden');
+      memberIds = dm;
     }
     // Verschlüsseln (verteilt bei Bedarf vorher den eigenen Sender-Key).
-    const payload = await e2ee.encryptForChannel(
-      channelId,
-      server.id,
-      server.members.map((m) => m.userId),
-      content,
-    );
+    const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, content);
     const message = await authFetch<MessageInfo>(`/api/channels/${channelId}/messages`, {
       method: 'POST',
       body: payload,

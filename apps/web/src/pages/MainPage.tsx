@@ -1,9 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useServersStore } from '../store/servers';
+import { useFriendsStore } from '../store/friends';
+import { useDmsStore } from '../store/dms';
 import ServerRail from '../components/ServerRail';
 import ChannelSidebar from '../components/ChannelSidebar';
 import MembersPanel from '../components/MembersPanel';
 import ChatView from '../components/ChatView';
+import HomeView from '../components/HomeView';
 import RolesDialog from '../components/RolesDialog';
 import Modal from '../components/Modal';
 import { ApiError } from '../lib/api';
@@ -14,36 +17,49 @@ interface MainPageProps {
 
 type DialogKind = 'createServer' | 'joinServer' | 'createChannel' | 'roles' | null;
 
-/** Hauptansicht nach dem Login: Server-Leiste, Kanäle, Inhalt, Mitglieder. */
+/** Hauptansicht nach dem Login: Server-Leiste + Home (DMs/Freunde) ODER Server. */
 export default function MainPage({ onOpenProfile }: MainPageProps) {
   const loaded = useServersStore((s) => s.loaded);
   const servers = useServersStore((s) => s.servers);
   const server = useServersStore((s) => s.selectedServer);
   const selectedChannelId = useServersStore((s) => s.selectedChannelId);
   const loadServers = useServersStore((s) => s.loadServers);
+  const selectServer = useServersStore((s) => s.selectServer);
+  const friendsLoaded = useFriendsStore((s) => s.loaded);
+  const loadFriends = useFriendsStore((s) => s.loadFriends);
+  const dmsLoaded = useDmsStore((s) => s.loaded);
+  const loadDms = useDmsStore((s) => s.loadDms);
 
   const [dialog, setDialog] = useState<DialogKind>(null);
+  const [home, setHome] = useState(false);
 
   // Initiales Laden (Gateway-READY lädt ebenfalls – hier zusätzlich, damit die
   // UI nicht auf den WebSocket warten muss).
   useEffect(() => {
     if (!loaded) void loadServers();
-  }, [loaded, loadServers]);
+    if (!friendsLoaded) void loadFriends();
+    if (!dmsLoaded) void loadDms();
+  }, [loaded, loadServers, friendsLoaded, loadFriends, dmsLoaded, loadDms]);
 
   const channel = server?.channels.find((c) => c.id === selectedChannelId) ?? null;
+  // Ohne Server ist Home die sinnvollere Ansicht (statt leerem Zustand).
+  const showHome = home || (loaded && servers.length === 0);
 
   return (
     <div className="flex h-screen bg-zinc-800 text-zinc-100">
       <ServerRail
+        homeActive={showHome}
+        onSelectHome={() => setHome(true)}
+        onSelectServer={(serverId) => {
+          setHome(false);
+          void selectServer(serverId);
+        }}
         onCreateServer={() => setDialog('createServer')}
         onJoinServer={() => setDialog('joinServer')}
       />
 
-      {servers.length === 0 && loaded ? (
-        <EmptyState
-          onCreate={() => setDialog('createServer')}
-          onJoin={() => setDialog('joinServer')}
-        />
+      {showHome ? (
+        <HomeView onOpenProfile={onOpenProfile} />
       ) : (
         <>
           <ChannelSidebar
@@ -64,34 +80,14 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
         </>
       )}
 
-      {dialog === 'createServer' && <CreateServerDialog onClose={() => setDialog(null)} />}
-      {dialog === 'joinServer' && <JoinServerDialog onClose={() => setDialog(null)} />}
+      {dialog === 'createServer' && (
+        <CreateServerDialog onClose={() => setDialog(null)} onSuccess={() => setHome(false)} />
+      )}
+      {dialog === 'joinServer' && (
+        <JoinServerDialog onClose={() => setDialog(null)} onSuccess={() => setHome(false)} />
+      )}
       {dialog === 'createChannel' && <CreateChannelDialog onClose={() => setDialog(null)} />}
       {dialog === 'roles' && <RolesDialog onClose={() => setDialog(null)} />}
-    </div>
-  );
-}
-
-function EmptyState({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 text-zinc-400">
-      <p className="text-lg">Du bist noch auf keinem Server.</p>
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onCreate}
-          className="rounded-lg bg-indigo-600 px-4 py-2.5 font-semibold text-white transition hover:bg-indigo-500"
-        >
-          Server erstellen
-        </button>
-        <button
-          type="button"
-          onClick={onJoin}
-          className="rounded-lg border border-zinc-600 px-4 py-2.5 font-semibold text-zinc-300 transition hover:bg-zinc-700"
-        >
-          Server beitreten
-        </button>
-      </div>
     </div>
   );
 }
@@ -151,21 +147,24 @@ function DialogForm({
   );
 }
 
-function CreateServerDialog({ onClose }: { onClose: () => void }) {
+function CreateServerDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const createServer = useServersStore((s) => s.createServer);
   return (
     <Modal title="Server erstellen" onClose={onClose}>
       <DialogForm
         placeholder="Name des Servers"
         submitLabel="Erstellen"
-        onSubmit={createServer}
+        onSubmit={async (name) => {
+          await createServer(name);
+          onSuccess(); // aus der Home-Ansicht direkt zum neuen Server wechseln
+        }}
         onClose={onClose}
       />
     </Modal>
   );
 }
 
-function JoinServerDialog({ onClose }: { onClose: () => void }) {
+function JoinServerDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const joinServer = useServersStore((s) => s.joinServer);
   return (
     <Modal title="Server beitreten" onClose={onClose}>
@@ -175,7 +174,10 @@ function JoinServerDialog({ onClose }: { onClose: () => void }) {
       <DialogForm
         placeholder="Server-ID"
         submitLabel="Beitreten"
-        onSubmit={joinServer}
+        onSubmit={async (serverId) => {
+          await joinServer(serverId);
+          onSuccess();
+        }}
         onClose={onClose}
       />
     </Modal>
