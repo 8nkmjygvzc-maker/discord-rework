@@ -31,15 +31,13 @@ export class MessagesService {
     });
     const info = toMessageInfo(message);
 
-    const members = await this.prisma.membership.findMany({
-      where: { serverId },
-      select: { userId: true },
-    });
-    await this.gateway.publishDispatch(
-      'MESSAGE_CREATE',
-      { message: info },
-      members.map((m) => m.userId),
+    // Nur Mitglieder mit ViewChannels erhalten das Event – sonst würde die
+    // REST-History zwar sperren, das Gateway aber trotzdem live zustellen.
+    const recipients = await this.permissions.getMemberIdsWithPermission(
+      serverId,
+      Permissions.ViewChannels,
     );
+    await this.gateway.publishDispatch('MESSAGE_CREATE', { message: info }, recipients);
     return info;
   }
 

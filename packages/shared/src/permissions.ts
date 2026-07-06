@@ -26,8 +26,7 @@ export const Permissions = {
 export type PermissionName = keyof typeof Permissions;
 
 /** Standardrechte der automatisch angelegten Server-Rolle („Mitglied“). */
-export const DEFAULT_ROLE_PERMISSIONS: bigint =
-  Permissions.ViewChannels | Permissions.SendMessages;
+export const DEFAULT_ROLE_PERMISSIONS: bigint = Permissions.ViewChannels | Permissions.SendMessages;
 
 /** Für UI-Aufzählungen: Name, Bit und Beschreibung jedes Rechts. */
 export const PERMISSION_LIST: { name: PermissionName; label: string }[] = [

@@ -27,7 +27,7 @@ interface AuthState {
   /** Authentifizierter Fetch; erneuert den Access-Token bei 401 einmalig. */
   authFetch: <T>(
     path: string,
-    options?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown },
+    options?: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown },
   ) => Promise<T>;
 }
 
@@ -110,7 +110,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   authFetch: async <T>(
     path: string,
-    options: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown } = {},
+    options: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown } = {},
   ): Promise<T> => {
     try {
       return await apiFetch<T>(path, { ...options, accessToken: get().accessToken });

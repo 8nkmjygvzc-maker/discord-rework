@@ -49,4 +49,38 @@ export class PermissionsService {
     }
     return granted;
   }
+
+  /**
+   * IDs aller Mitglieder, deren effektive Rechte `required` enthalten – für
+   * gezielte Gateway-Dispatches (z. B. MESSAGE_CREATE nur an Mitglieder mit
+   * ViewChannels). Rechnet die Bitfelder in einem Rutsch im Speicher aus,
+   * statt getMemberPermissions pro Mitglied aufzurufen (N Queries).
+   */
+  async getMemberIdsWithPermission(serverId: string, required: bigint): Promise<string[]> {
+    const [server, defaultRole, members] = await Promise.all([
+      this.prisma.server.findUnique({ where: { id: serverId }, select: { ownerId: true } }),
+      this.prisma.role.findFirst({
+        where: { serverId, isDefault: true },
+        select: { permissions: true },
+      }),
+      this.prisma.membership.findMany({
+        where: { serverId },
+        select: {
+          userId: true,
+          roles: { select: { role: { select: { permissions: true } } } },
+        },
+      }),
+    ]);
+    if (!server) return [];
+
+    const base = defaultRole?.permissions ?? 0n;
+    return members
+      .filter((member) => {
+        if (member.userId === server.ownerId) return true;
+        let granted = base;
+        for (const assignment of member.roles) granted |= assignment.role.permissions;
+        return hasPermission(granted, required);
+      })
+      .map((member) => member.userId);
+  }
 }

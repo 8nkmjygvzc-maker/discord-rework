@@ -1,16 +1,6 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import {
-  Permissions,
-  permissionsFromString,
-  permissionsToString,
-  RoleInfo,
-} from '@parley/shared';
+import { Permissions, permissionsFromString, permissionsToString, RoleInfo } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { PermissionsService } from './permissions.service';
@@ -134,12 +124,20 @@ export class RolesService {
     return role;
   }
 
-  private async publishToMembers(serverId: string, t: Parameters<GatewayService['publishDispatch']>[0], d: unknown): Promise<void> {
+  private async publishToMembers(
+    serverId: string,
+    t: Parameters<GatewayService['publishDispatch']>[0],
+    d: unknown,
+  ): Promise<void> {
     const members = await this.prisma.membership.findMany({
       where: { serverId },
       select: { userId: true },
     });
-    await this.gateway.publishDispatch(t, d, members.map((m) => m.userId));
+    await this.gateway.publishDispatch(
+      t,
+      d,
+      members.map((m) => m.userId),
+    );
   }
 }
 

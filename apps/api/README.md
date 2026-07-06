@@ -76,12 +76,12 @@ als Dezimal-String). Effektive Rechte: Owner → Administrator; sonst
 Standardrolle ∪ zugewiesene Rollen (Bit-OR). Durchsetzung zentral im
 `PermissionsService` – in JEDEM Endpunkt serverseitig, die UI blendet nur aus.
 
-| Methode    | Pfad                                             | Recht                    |
-| ---------- | ------------------------------------------------ | ------------------------ |
-| POST       | `/api/servers/:id/roles`                         | ManageRoles              |
-| PATCH      | `/api/roles/:id`                                 | ManageRoles              |
-| DELETE     | `/api/roles/:id`                                 | ManageRoles (nie Default)|
-| PUT/DELETE | `/api/servers/:id/members/:userId/roles/:roleId` | ManageRoles              |
+| Methode    | Pfad                                             | Recht                     |
+| ---------- | ------------------------------------------------ | ------------------------- |
+| POST       | `/api/servers/:id/roles`                         | ManageRoles               |
+| PATCH      | `/api/roles/:id`                                 | ManageRoles               |
+| DELETE     | `/api/roles/:id`                                 | ManageRoles (nie Default) |
+| PUT/DELETE | `/api/servers/:id/members/:userId/roles/:roleId` | ManageRoles               |
 
 Geänderte Rechte-Anforderungen bestehender Endpunkte: Server-PATCH → ManageServer,
 Kanal-CRUD → ManageChannels, Nachricht senden → SendMessages, History → ViewChannels.

@@ -124,7 +124,9 @@ export default function RolesDialog({ onClose }: { onClose: () => void }) {
 
           {!role.isDefault && (
             <>
-              <h3 className="mt-4 text-sm font-semibold text-zinc-200">Mitglieder mit dieser Rolle</h3>
+              <h3 className="mt-4 text-sm font-semibold text-zinc-200">
+                Mitglieder mit dieser Rolle
+              </h3>
               <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto">
                 {server.members.map((member) => {
                   const assigned = member.roleIds.includes(role.id);

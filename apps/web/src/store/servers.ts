@@ -47,7 +47,7 @@ const byPosition = (a: ChannelInfo, b: ChannelInfo): number => a.position - b.po
 
 function authFetch<T>(
   path: string,
-  options?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown },
+  options?: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown },
 ): Promise<T> {
   return useAuthStore.getState().authFetch<T>(path, options);
 }

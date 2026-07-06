@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 4 abgeschlossen (05.07.2026)
+## Status: Phase 5 abgeschlossen (06.07.2026)
 
 ## Erledigt
 
@@ -60,9 +60,23 @@
 
 **Verifiziert:** arian (UI) ↔ frieda (Skript am Gateway): Nachrichten kommen in beide Richtungen live an; History übersteht Reload; Nicht-Mitglied bekommt 404 auf Lesen UND Senden (serverseitig). Build/Lint grün.
 
+### Phase 5 – Rollen & Berechtigungen (06.07.2026)
+
+Die Implementierung kam als Commit `39b9ec7` („initial commit rijon“) von Rijon; diese Session hat den Code reviewt, Lücken geschlossen und die Phase verifiziert.
+
+- **Bitfield** in `packages/shared/src/permissions.ts`: BigInt (über JSON als Dezimal-String), 9 Rechte (ViewChannels, SendMessages, ManageChannels, ManageRoles, ManageServer, Kick/Ban, ManageMessages, Administrator); unbekannte Bits werden beim Schreiben maskiert
+- **Standardrolle „Mitglied“** (isDefault, View|Send) pro Server, gilt implizit für alle Mitglieder – nicht löschbar/zuweisbar, Name fix; Backfill-Migration versorgt Bestands-Server
+- **Effektive Rechte:** Owner → Administrator; sonst Standardrolle ∪ zugewiesene Rollen (Bit-OR). Zentral im `PermissionsService`: 404 für Nicht-Mitglieder (kein Existenz-Leak), 403 bei fehlendem Recht – in jedem Endpunkt serverseitig
+- **REST:** Rollen-CRUD + Zuweisung (`PUT/DELETE /servers/:id/members/:userId/roles/:roleId`) unter ManageRoles; bestehende Endpunkte umgestellt (Server-PATCH → ManageServer, Kanal-CRUD → ManageChannels, Senden → SendMessages, History → ViewChannels); Server-DELETE bleibt Owner-only
+- **Gateway:** `ROLE_CREATE/UPDATE/DELETE`, `MEMBER_ROLES_UPDATE`. **Review-Fix:** `MESSAGE_CREATE` geht nur noch an Mitglieder mit ViewChannels (`getMemberIdsWithPermission`) – vorher hätte das Gateway live zugestellt, obwohl die REST-History gesperrt war
+- **Frontend:** `RolesDialog` (anlegen, Rechte togglen, zuweisen, löschen), Rollen-Badges im Mitglieder-Panel, `myPermissions` in `ServerDetails`; UI blendet nur aus (Kanal-+, Rollen-Button, Eingabefeld). Review-Fix: `PUT` fehlte im Methoden-Typ von `authFetch`
+- **Nebenbei repariert:** `node_modules` unvollständig + Prisma-Client veraltet (npm install, prisma generate), 3 nicht eingespielte Migrationen deployed; `.gitattributes` erzwingt jetzt LF (der frische Checkout mit `core.autocrlf=true` hatte alle Dateien auf CRLF gestellt → Prettier schlug überall fehl), Working Tree auf LF normalisiert
+
+**Verifiziert:** Skript mit 33 Checks, alle grün – Kerntest: Senden ohne Schreibrecht → **403 vom Server**; 404 statt 403 für Nicht-Mitglieder; alle Verwaltungs-Endpunkte ohne Recht 403; Rollenzuweisung schaltet Rechte frei, Entzug sperrt wieder; Gateway liefert `MESSAGE_CREATE` nur mit ViewChannels (mit und ohne getestet); Standardrolle geschützt (Löschen/Zuweisen → 400, Name unveränderbar); unbekannte Bits maskiert. UI: Rollen-Dialog geprüft (Rolle angelegt, Recht getoggelt – Zustand kommt über ROLE_UPDATE-Event zurück). Build/Tests/Lint/Format grün.
+
 ## Nächste Phase
 
-**Phase 5 – Rollen & Berechtigungen:** Rollenverwaltung, Berechtigungs-Bitfield, Zuweisung pro Mitglied, serverseitige Durchsetzung. Verifikation: Nutzer ohne Schreibrecht wird vom Server blockiert, nicht nur von der UI versteckt.
+**Phase 6 – Ende-zu-Ende-Verschlüsselung:** Schlüsselgenerierung (X25519 + Prekeys), Schlüsselaustausch, Double-Ratchet für DMs und Sender-Key-Ratchet für Kanäle, Klartext aus Phase 4 ersetzen. Verifikation: In der DB nur Ciphertext, Clients kommunizieren trotzdem lesbar. Kryptographisch anspruchsvollste Phase – bei Unsicherheit stoppen und Ansatz erklären statt unsicher vereinfachen (CLAUDE.md Abschnitt 6/7).
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 
@@ -82,3 +96,5 @@ Diese Maschine war frisch aufgesetzt (kein Node, kein Docker, WSL defekt). Docke
 - Server starten: Preview-Panel-Konfigurationen `api`/`web` (`.claude/launch.json`, nutzen `scripts/dev-*.cmd`) oder `npm run dev:api` / `npm run dev:web`
 - Infrastruktur: `scripts\dev-infra.ps1` (portabel) oder `docker compose -f infra/docker-compose.yml up -d` (falls Docker vorhanden)
 - Testnutzer in der Dev-DB (frisch angelegt in Session 3): `arian.test@example.com` und `frieda.test@example.com`, Passwort jeweils `test-passwort-123`
+- Session 4 (06.07.2026): Dev-DB stand nur auf der Phase-1-Migration – `servers_channels`, `messages` und `roles` per `prisma migrate deploy` nachgezogen; Server „Arians Treffpunkt“ (Owner `arian_test`) neu angelegt, alte Server/Nachrichten waren weg
+- `core.autocrlf=true` ist global gesetzt – `.gitattributes` pinnt deshalb LF für den Working Tree; nach einem frischen Checkout ggf. einmal `git add --renormalize .` bzw. Prettier laufen lassen

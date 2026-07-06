@@ -1,0 +1,13 @@
+# Zeilenenden festnageln: Repo und Working Tree immer LF (Prettier erwartet LF),
+# unabhängig von core.autocrlf der jeweiligen Maschine.
+* text=auto eol=lf
+
+# Windows-Batch-Dateien brauchen CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binärdateien nie konvertieren
+*.png binary
+*.ico binary
+*.jpg binary
+*.woff2 binary
