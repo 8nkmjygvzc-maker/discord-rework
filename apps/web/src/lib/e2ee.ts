@@ -121,7 +121,7 @@ export const e2ee = {
   init(userId: string): Promise<void> {
     if (currentUserId === userId && initPromise) return initPromise;
     currentUserId = userId;
-    initPromise = (async () => {
+    const attempt: Promise<void> = (async () => {
       await cryptoReady();
       db = await CryptoDb.open(userId);
       identity = (await db.get<IdentityKeyPair>('kv', 'identity')) ?? null;
@@ -142,8 +142,14 @@ export const e2ee = {
           signedPreKeySignature: signedPreKey.signature,
         },
       });
-    })();
-    return initPromise;
+    })().catch((err: unknown) => {
+      // Fehlschlag (z. B. Netzfehler beim Veröffentlichen) nicht einfrieren:
+      // Der nächste (Re-)Connect soll die Initialisierung erneut versuchen.
+      if (initPromise === attempt) initPromise = null;
+      throw err;
+    });
+    initPromise = attempt;
+    return attempt;
   },
 
   /** Bei Logout: Verbindungen kappen, Schlüssel bleiben in IndexedDB erhalten. */
@@ -281,9 +287,13 @@ async function distributeSenderKey(
 ): Promise<void> {
   const distribution = JSON.stringify(senderKeyDistribution(record.key, channelId));
   for (const memberId of memberIds) {
-    if (memberId === currentUserId || record.distributedTo[memberId]) continue;
+    if (memberId === currentUserId) continue;
     const bundle = await fetchBundle(memberId);
     if (!bundle) continue;
+    // „Schon verteilt“ zählt nur, solange der Identitätsschlüssel derselbe ist:
+    // Nach einem Schlüssel-Reset (neuer Browser) braucht das Mitglied den
+    // Sender-Key erneut – sonst bliebe es dauerhaft ohne Schlüssel.
+    if (record.distributedTo[memberId] === bundle.identityKey) continue;
     try {
       const payload = await encryptEnvelopeTo(database, memberId, bundle, distribution);
       await authFetch<void>('/api/envelopes', {
@@ -340,7 +350,13 @@ async function processEnvelope(envelope: KeyEnvelopeInfo): Promise<void> {
   const database = db!;
   await withLock(async () => {
     const processed = (await database.get<string[]>('kv', 'processedEnvelopes')) ?? [];
-    if (processed.includes(envelope.id)) return;
+    if (processed.includes(envelope.id)) {
+      // Schon verarbeitet – aber das damalige Ack könnte fehlgeschlagen sein.
+      // Erneut quittieren (DELETE ist idempotent), sonst bleibt der Umschlag
+      // dauerhaft in der Mailbox liegen.
+      await authFetch<void>(`/api/envelopes/${envelope.id}`, { method: 'DELETE' });
+      return;
+    }
 
     const payload = envelope.payload;
     try {

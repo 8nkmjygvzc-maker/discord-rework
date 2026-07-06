@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-  OnModuleInit,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import {
   cryptoReady,
   DeviceKeyBundle,
@@ -100,11 +95,9 @@ export class KeysService implements OnModuleInit {
         payload: dto.payload as unknown as Prisma.InputJsonValue,
       },
     });
-    await this.gateway.publishDispatch(
-      'KEY_ENVELOPE',
-      { envelope: toEnvelopeInfo(envelope) },
-      [dto.toUserId],
-    );
+    await this.gateway.publishDispatch('KEY_ENVELOPE', { envelope: toEnvelopeInfo(envelope) }, [
+      dto.toUserId,
+    ]);
   }
 
   /** Ungelesene Umschläge des Nutzers, älteste zuerst (für den Login-Abgleich). */

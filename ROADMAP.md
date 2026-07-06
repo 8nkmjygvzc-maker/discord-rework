@@ -12,6 +12,11 @@
 ## Offene Sicherheits-Trade-offs
 
 - **Web-E2EE-Grundproblem:** Der Server liefert den Krypto-Code als JavaScript aus; ein kompromittierter Server könnte manipulierten Code ausliefern. Milderungen später: Subresource Integrity, signierte Builds, native Clients (CLAUDE.md Abschnitt 6)
+- **Trust on first use (Phase 6):** Clients vertrauen den Schlüsselbündeln, die der Server ausliefert – ein kompromittierter Server könnte Bundles austauschen (MITM). Milderung später: Fingerprint-/“Safety-Number“-Verifikation in der UI, wie bei Signal
+- **X3DH ohne One-Time-Prekeys (Phase 6):** bewusst der in der Signal-Spezifikation dokumentierte Fallback-Modus; OPKs (bessere Forward Secrecy für die ERSTE Nachricht einer Session) später ergänzen (Server-Endpunkt zum Nachfüllen + Verbrauch beim Abruf)
+- **Sender-Key-Rotation ist Best-Effort (Phase 6):** Rotiert wird, wenn der Client ein `SERVER_MEMBER_REMOVE` live sieht. Wer beim Austritt offline war, rotiert nicht (der Ausgetretene erhält zwar weder Events noch History vom Server, könnte aber bei einem späteren DB-Leak mit seinem alten Schlüssel mitlesen). Fix-Idee: Mitglieder-Abgleich beim Reconnect oder serverseitiges Rotations-Signal
+- **Sender-Keys gehen an ALLE Server-Mitglieder,** auch ohne ViewChannels (Ciphertext-Zugriff sperrt der Server). Solange Rechte serverweit gelten unkritisch – bei Kanal-Overwrites (s. u.) neu bewerten
+- **Schlüsselmaterial liegt unverschlüsselt in IndexedDB** (wie z. B. bei Signal Desktop auf der Platte). Passphrase-Schutz/Key-Backup wäre ein eigenes Feature – zusammen mit Multi-Device betrachten
 - Dev-Standardpasswörter in `docker-compose.yml`-Defaults (`parley_dev_password`) – nur für lokale Entwicklung; vor jedem echten Deployment durch Secrets ersetzen
 
 ## Technische Schulden / Vereinfachungen
@@ -23,6 +28,10 @@
 - **Presence-Snapshot skaliert linear** (`HGETALL presence:users` + EXISTS-Pipeline) – bei sehr vielen Nutzern auf Server-/Freundeskreis-Scoping umstellen (kommt ohnehin mit Phase 3/7)
 - **`trust proxy`** ist in Express nicht gesetzt – `req.ip` ist hinter einem Reverse-Proxy die Proxy-IP. Vor echtem Deployment setzen, sonst drosselt das Rate-Limit alle Nutzer gemeinsam
 - **Dev-Infra ohne Docker:** Auf Maschinen ohne Docker Desktop laufen PostgreSQL/Redis/MinIO portabel (`scripts/dev-infra.ps1`); Redis ist dort ein 5.0-Windows-Port (tporadowski) – für die genutzten Kommandos (INCR/EXPIRE/Pub-Sub) ausreichend, aber kein 1:1-Ersatz für Redis 7 aus docker-compose
+- **Sender-Key-Verteilung skaliert linear (Phase 6):** Beim Senden wird pro Mitglied das Schlüsselbündel geprüft (60-s-Cache) und bei Bedarf ein Umschlag verschickt – bei sehr großen Servern viele Requests. Später: `DEVICE_KEYS_CHANGED`-Gateway-Event statt Polling, Umschläge bündeln
+- **Umschläge an beliebige Nutzer:** `POST /api/envelopes` verlangt bisher keinen gemeinsamen Server (Mailbox-Limit 1000 begrenzt Missbrauch); mit Phase 7 (Freunde/DMs) auf Sichtbarkeitsregeln einschränken
+- **Skipped-Message-Keys im Double Ratchet** werden pro Kettenwechsel begrenzt (MAX_SKIP), aber nie global aufgeräumt – bei sehr langlebigen Sessions irgendwann beschneiden (Signal löscht nach Zeit/Anzahl)
+- **E2EE-Testnutzer:** Die Verifikationsläufe von Phase 6 haben `charlie_…`-Wegwerf-Nutzer in der Dev-DB hinterlassen (Testserver wurden gelöscht; einen User-Lösch-Endpunkt gibt es noch nicht – kommt spätestens mit dem DSGVO-Löschkonzept)
 
 ## Auth – bewusst auf später verschoben (Stand Phase 1)
 

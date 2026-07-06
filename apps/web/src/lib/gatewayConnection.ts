@@ -35,12 +35,18 @@ const client = new GatewayClient({
         useMessagesStore.getState().handleMessageCreate((d as { message: MessageInfo }).message);
         return;
       case 'KEY_ENVELOPE':
-        void e2ee.handleEnvelopeEvent((d as { envelope: KeyEnvelopeInfo }).envelope);
+        // Fehler nicht eskalieren: Der Umschlag bleibt bis zum Ack in der
+        // Mailbox und wird beim nächsten syncEnvelopes erneut zugestellt.
+        e2ee
+          .handleEnvelopeEvent((d as { envelope: KeyEnvelopeInfo }).envelope)
+          .catch((err: unknown) => console.warn('Schlüssel-Umschlag nicht verarbeitet:', err));
         return;
       case 'SERVER_MEMBER_REMOVE': {
         // Der Ausgetretene kennt die bisherigen Sender-Keys → vor der
         // nächsten eigenen Nachricht in diesem Server rotieren.
-        void e2ee.markServerForRotation((d as ServerMemberRemovePayload).serverId);
+        e2ee
+          .markServerForRotation((d as ServerMemberRemovePayload).serverId)
+          .catch((err: unknown) => console.warn('Rotations-Vormerkung fehlgeschlagen:', err));
         useServersStore.getState().handleGatewayEvent(t, d);
         return;
       }

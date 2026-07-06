@@ -66,8 +66,8 @@ dispatcht (`SERVER_*`, `CHANNEL_*` – gezielt über `publishDispatch(..., userI
 | GET     | `/api/channels/:id/messages?before=<ISO>` | History, 50er-Seiten rückwärts                |
 
 Neue Nachrichten erreichen die Mitglieder als `MESSAGE_CREATE`-Gateway-Event.
-Phase 4 speichert bewusst Klartext (`content`) – Phase 6 ersetzt das durch
-Ciphertext + Nonce (E2EE), der Server kann dann nicht mehr mitlesen.
+Phase 4 speicherte bewusst Klartext (`content`) – seit Phase 6 nimmt der Server
+nur noch `ciphertext` + `nonce` + Klartext-`header` an (E2EE, s. u.).
 
 ## Rollen & Berechtigungen (Phase 5)
 
@@ -87,6 +87,28 @@ Geänderte Rechte-Anforderungen bestehender Endpunkte: Server-PATCH → ManageSe
 Kanal-CRUD → ManageChannels, Nachricht senden → SendMessages, History → ViewChannels.
 Server-DELETE bleibt Owner-only. Events: `ROLE_CREATE/UPDATE/DELETE`,
 `MEMBER_ROLES_UPDATE`.
+
+## Ende-zu-Ende-Verschlüsselung (Phase 6)
+
+Der Server speichert und verteilt ausschließlich **öffentliche** Schlüssel und
+Ciphertext – entschlüsseln können nur die Clients (Protokoll und Primitiven:
+`packages/shared/src/crypto/`, Orchestrierung: `apps/web/src/lib/e2ee.ts`).
+Das `keys/`-Modul validiert beim Upload lediglich, dass die Prekey-Signatur zum
+Identitätsschlüssel passt (libsodium), und transportiert Ende-zu-Ende
+verschlüsselte Schlüssel-Umschläge über eine Mailbox (Empfänger löscht per Ack).
+
+| Methode | Pfad                  | Zweck                                                           |
+| ------- | --------------------- | --------------------------------------------------------------- |
+| PUT     | `/api/keys`           | eigene öffentliche Geräteschlüssel veröffentlichen/erneuern     |
+| GET     | `/api/users/:id/keys` | Schlüsselbündel eines Nutzers für X3DH abrufen                  |
+| POST    | `/api/envelopes`      | verschlüsselten Schlüssel-Umschlag zustellen (max. 16 KiB)      |
+| GET     | `/api/envelopes`      | eigene ungelesene Umschläge abholen (Login-/Reconnect-Abgleich) |
+| DELETE  | `/api/envelopes/:id`  | Umschlag quittieren (löschen, idempotent)                       |
+
+Ein Identitätsschlüssel-Wechsel beim `PUT /api/keys` gilt als Schlüssel-Reset:
+liegengebliebene Umschläge des Nutzers werden verworfen (unlesbar geworden).
+Live zugestellte Umschläge kommen zusätzlich als `KEY_ENVELOPE`-Gateway-Event.
+v1 = genau ein Gerät pro Account (`Device.userId` unique, Multi-Device: ROADMAP).
 
 ## Datenbank
 

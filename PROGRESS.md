@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 5 abgeschlossen (06.07.2026)
+## Status: Phase 6 abgeschlossen (06.07.2026)
 
 ## Erledigt
 
@@ -74,9 +74,24 @@ Die Implementierung kam als Commit `39b9ec7` („initial commit rijon“) von Ri
 
 **Verifiziert:** Skript mit 33 Checks, alle grün – Kerntest: Senden ohne Schreibrecht → **403 vom Server**; 404 statt 403 für Nicht-Mitglieder; alle Verwaltungs-Endpunkte ohne Recht 403; Rollenzuweisung schaltet Rechte frei, Entzug sperrt wieder; Gateway liefert `MESSAGE_CREATE` nur mit ViewChannels (mit und ohne getestet); Standardrolle geschützt (Löschen/Zuweisen → 400, Name unveränderbar); unbekannte Bits maskiert. UI: Rollen-Dialog geprüft (Rolle angelegt, Recht getoggelt – Zustand kommt über ROLE_UPDATE-Event zurück). Build/Tests/Lint/Format grün.
 
+### Phase 6 – Ende-zu-Ende-Verschlüsselung (06.07.2026)
+
+Wie Phase 5 kam die Implementierung als angelieferter Commit (`3a38c88`); diese Session hat den Krypto-Code reviewt, vier Lücken geschlossen und die Phase verifiziert.
+
+- **Krypto-Bausteine** in `packages/shared/src/crypto/` (nur libsodium-Primitiven, 10 Unit-Tests):
+  - Identität = Ed25519 (signieren) + Konvertierung nach X25519 (DH), signierter Prekey; Server prüft die Prekey-Signatur beim Upload
+  - **X3DH** nach Signal-Spec (Fallback-Modus ohne One-Time-Prekeys, siehe ROADMAP), KDF = keyed BLAKE2b
+  - **Double Ratchet** (BLAKE2b-Ketten, XChaCha20-Poly1305, Header als AD, MAX_SKIP-Schutz); alle Funktionen pure – Zustand wird erst nach erfolgreichem Ver-/Entschlüsseln persistiert
+  - **Sender-Key-Ratchet** für Kanäle (Megolm-Prinzip): Kette + Ed25519-Signatur (Mit-Mitglieder können nichts fälschen), Entschlüsseln idempotent (frühester Stand + Vorspulen), AD bindet die Kanal-ID
+- **API:** `Device` (ein Gerät pro Account, nur öffentliche Schlüssel) + `KeyEnvelope`-Mailbox (Ende-zu-Ende-verschlüsselte Sender-Key-Verteilung, Ack = DELETE, Live-Zustellung als `KEY_ENVELOPE`-Event); `PUT /keys`, `GET /users/:id/keys`, `POST/GET/DELETE /envelopes`; `Message` speichert nur noch `ciphertext`+`nonce`+`header` (Migration `e2ee` löscht die Klartext-Bestände); Identitätswechsel = Schlüssel-Reset (verwirft liegengebliebene Umschläge)
+- **Web-Client:** `lib/e2ee.ts` (Schlüssel in IndexedDB pro Nutzer, Web-Lock für Multi-Tab, Sender-Key-Verteilung vor dem Senden, Rotation nach `SERVER_MEMBER_REMOVE`), entschlüsselte Texte nur im Speicher, 🔒-Platzhalter für (noch) nicht entschlüsselbare Nachrichten, 🔒-Badge im Kanal-Header
+- **Review-Fixes dieser Session:** (1) Schlüssel-Reset eines Mitglieds wird bei der Sender-Key-Verteilung jetzt erkannt (`distributedTo` vergleicht den Identitätsschlüssel – vorher wäre das Mitglied dauerhaft ohne Schlüssel geblieben); (2) bereits verarbeitete Umschläge werden erneut geackt, falls das Lösch-DELETE damals fehlschlug; (3) fehlgeschlagene E2EE-Initialisierung friert nicht mehr bis zum Reload ein (Reconnect versucht es erneut); (4) unbehandelte Promise-Rejections im Gateway-Dispatcher beseitigt
+
+**Verifiziert:** Skript mit 33 Checks, alle grün – u. a.: DB enthält nur Ciphertext (`content`-Spalte weg, kein Klartext, keine privaten Schlüssel, Chain-Keys in Umschlägen nur verschlüsselt); X3DH+Ratchet-Umschlag offline (Mailbox) und live (Gateway); Vorspulen/Out-of-Order; **Beitritts-Semantik** (Nachrichten vor dem Beitritt bleiben unlesbar); **Rotation nach Austritt** (Ausgetretener: kein Event, History 404, alte Schlüssel passen nicht); Schlüssel-Reset verwirft Mailbox; Validierung (ungültige Prekey-Signatur 400, Umschlag >16 KiB 400, ohne Header 400). Interop-Test Web-Client ↔ Skript-Client: UI-Nachricht wird nach friedas Schlüssel-Reset automatisch neu verteilt und entschlüsselt, friedas verschlüsselte Antwort erscheint lesbar in der UI, übersteht Reload (IndexedDB); alte, fremdverschlüsselte Nachrichten zeigen den 🔒-Platzhalter. Build/Tests (21)/Lint/Format grün.
+
 ## Nächste Phase
 
-**Phase 6 – Ende-zu-Ende-Verschlüsselung:** Schlüsselgenerierung (X25519 + Prekeys), Schlüsselaustausch, Double-Ratchet für DMs und Sender-Key-Ratchet für Kanäle, Klartext aus Phase 4 ersetzen. Verifikation: In der DB nur Ciphertext, Clients kommunizieren trotzdem lesbar. Kryptographisch anspruchsvollste Phase – bei Unsicherheit stoppen und Ansatz erklären statt unsicher vereinfachen (CLAUDE.md Abschnitt 6/7).
+**Phase 7 – Direktnachrichten & Freunde:** 1:1-Chats unabhängig von Servern (Channel-Typ DM existiert schon, `serverId` nullable), Freundschaftsanfragen/-status (`Friendship`-Modell aus CLAUDE.md Abschnitt 5). Die 1:1-Ratchet-Sessions aus Phase 6 werden dabei direkt zum Nachrichtenkanal; Presence-Routing auf Sichtbarkeit umstellen (siehe ROADMAP) und `POST /api/envelopes` auf Freunde/gemeinsame Server einschränken.
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 

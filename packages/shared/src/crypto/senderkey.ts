@@ -88,10 +88,7 @@ export function createSenderKey(): OwnSenderKey {
 }
 
 /** Verteilungs-Nutzlast mit dem AKTUELLEN Stand (ältere Nachrichten bleiben zu). */
-export function senderKeyDistribution(
-  key: OwnSenderKey,
-  channelId: string,
-): SenderKeyDistribution {
+export function senderKeyDistribution(key: OwnSenderKey, channelId: string): SenderKeyDistribution {
   return {
     channelId,
     keyId: key.keyId,

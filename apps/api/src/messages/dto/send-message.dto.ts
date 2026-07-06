@@ -1,13 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  Equals,
-  IsInt,
-  IsObject,
-  IsString,
-  Length,
-  Min,
-  ValidateNested,
-} from 'class-validator';
+import { Equals, IsInt, IsObject, IsString, Length, Min, ValidateNested } from 'class-validator';
 
 /** Klartext-Header der E2EE-Nachricht (EncryptedMessageHeader aus @parley/shared). */
 export class MessageHeaderDto {
