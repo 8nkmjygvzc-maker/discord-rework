@@ -39,6 +39,7 @@ model Server {
 
   members  Membership[]
   channels Channel[]
+  roles    Role[]
 }
 
 model Membership {
@@ -49,9 +50,40 @@ model Membership {
   nickname String?
   joinedAt DateTime @default(now())
 
-  // Rollen-Zuweisung (roleIds) kommt in Phase 5 als eigene Relation.
+  roles MemberRole[]
+
   @@id([userId, serverId])
   @@index([serverId])
+}
+
+// Phase 5: Rollen mit Berechtigungs-Bitfield. Jeder Server hat genau eine
+// Standardrolle (isDefault) – sie gilt implizit für alle Mitglieder.
+model Role {
+  id          String   @id @default(uuid())
+  serverId    String
+  server      Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  name        String
+  permissions BigInt   @default(0)
+  color       String?
+  position    Int      @default(0)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  members MemberRole[]
+
+  @@index([serverId])
+}
+
+// Zuweisung Rolle ↔ Mitglied (Standardrolle braucht keine Einträge).
+model MemberRole {
+  userId     String
+  serverId   String
+  roleId     String
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  membership Membership @relation(fields: [userId, serverId], references: [userId, serverId], onDelete: Cascade)
+
+  @@id([userId, serverId, roleId])
+  @@index([roleId])
 }
 
 enum ChannelType {

@@ -40,6 +40,9 @@
 ## Ideen aus der Entwicklung
 
 - **Ownership-Übergabe:** Der Owner kann seinen Server aktuell nur löschen, nicht übergeben; „Server verlassen“ ist für Owner gesperrt. Übergabe-Flow sinnvoll ab Phase 13 (Moderation)
+- **Rollen-Hierarchie fehlt bewusst (Phase 5):** Jeder mit ManageRoles kann jede Rolle bearbeiten/zuweisen – auch sich selbst höhere Rechte geben (inkl. Administrator). Discord löst das über Rollen-Positionen („nur Rollen unterhalb der eigenen verwalten“). Vor echtem Mehrbenutzer-Betrieb nachziehen; `position`-Feld existiert bereits
+- **Kanal-spezifische Berechtigungen (Overwrites)** und private Kanäle (`isPrivate` ist bislang nur ein Flag ohne Wirkung) – späteres Feature
+- **UI-Feinschliff Rollen:** Rollenfarben wirken bisher nur auf Badges im Mitglieder-Panel, nicht auf Namen im Chat
 - **Beitritt per Server-ID** (Phase 3) ist bewusst primitiv – jeder mit der ID kann beitreten. Phase 12 ersetzt das durch Invite-Links mit Ablauf/Limit; danach den offenen Join-Endpunkt absichern oder entfernen
 - **Nachrichten bearbeiten/löschen:** Datenmodell ist vorbereitet (`editedAt`), UI/Endpunkte fehlen noch – sinnvoll zusammen mit Phase 9 (Reaktionen/Threads) oder 13 (Moderation: fremde Nachrichten löschen)
 - **Presence global statt gescoped:** PRESENCE_UPDATE geht an alle verbundenen Clients, nicht nur an gemeinsame Server-Mitglieder/Freunde – ab Phase 7 auf sichtbarkeitsbasiertes Routing umstellen (Grundlage `publishDispatch(..., targetUserIds)` existiert seit Phase 3)

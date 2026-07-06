@@ -50,7 +50,12 @@ export type GatewayEventType =
   | 'CHANNEL_UPDATE'
   | 'CHANNEL_DELETE'
   // Phase 4 – Text-Chat:
-  | 'MESSAGE_CREATE';
+  | 'MESSAGE_CREATE'
+  // Phase 5 – Rollen & Berechtigungen:
+  | 'ROLE_CREATE'
+  | 'ROLE_UPDATE'
+  | 'ROLE_DELETE'
+  | 'MEMBER_ROLES_UPDATE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {

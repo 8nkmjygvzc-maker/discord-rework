@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Message } from '@prisma/client';
-import type { MessageHistoryResponse, MessageInfo } from '@parley/shared';
+import { MessageHistoryResponse, MessageInfo, Permissions } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { PermissionsService } from '../roles/permissions.service';
 import { SendMessageDto } from './dto/send-message.dto';
 
 /** Seitengröße der History – Client lädt ältere Nachrichten seitenweise nach. */
@@ -15,10 +16,15 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async send(channelId: string, userId: string, dto: SendMessageDto): Promise<MessageInfo> {
-    const serverId = await this.requireTextChannelAccess(channelId, userId);
+    const serverId = await this.requireTextChannelAccess(
+      channelId,
+      userId,
+      Permissions.SendMessages,
+    );
     const message = await this.prisma.message.create({
       data: { channelId, senderId: userId, content: dto.content },
       include: { sender: { select: { username: true } } },
@@ -46,7 +52,7 @@ export class MessagesService {
     userId: string,
     before?: string,
   ): Promise<MessageHistoryResponse> {
-    await this.requireTextChannelAccess(channelId, userId);
+    await this.requireTextChannelAccess(channelId, userId, Permissions.ViewChannels);
 
     const messages = await this.prisma.message.findMany({
       where: {
@@ -64,10 +70,15 @@ export class MessagesService {
   }
 
   /**
-   * Kanal muss existieren, ein Server-Textkanal sein und der Nutzer Mitglied.
-   * 404 in allen Fehlerfällen (kein Existenz-Leak). Liefert die serverId.
+   * Kanal muss existieren, ein Server-Textkanal sein und der Nutzer das
+   * geforderte Recht haben. 404 für Nicht-Mitglieder (kein Existenz-Leak),
+   * 403 bei fehlendem Recht. Liefert die serverId.
    */
-  private async requireTextChannelAccess(channelId: string, userId: string): Promise<string> {
+  private async requireTextChannelAccess(
+    channelId: string,
+    userId: string,
+    required: bigint,
+  ): Promise<string> {
     const channel = await this.prisma.channel.findUnique({
       where: { id: channelId },
       select: { serverId: true, type: true },
@@ -75,10 +86,7 @@ export class MessagesService {
     if (!channel?.serverId || channel.type !== 'TEXT') {
       throw new NotFoundException('Kanal nicht gefunden');
     }
-    const membership = await this.prisma.membership.findUnique({
-      where: { userId_serverId: { userId, serverId: channel.serverId } },
-    });
-    if (!membership) throw new NotFoundException('Kanal nicht gefunden');
+    await this.permissions.requirePermission(channel.serverId, userId, required);
     return channel.serverId;
   }
 }

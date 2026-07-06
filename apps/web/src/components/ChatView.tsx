@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import type { ChannelInfo } from '@parley/shared';
+import { ChannelInfo, hasPermission, Permissions, permissionsFromString } from '@parley/shared';
 import { useMessagesStore } from '../store/messages';
 import { useAuthStore } from '../store/auth';
+import { useServersStore } from '../store/servers';
 import { ApiError } from '../lib/api';
 
 interface ChatViewProps {
@@ -11,6 +12,7 @@ interface ChatViewProps {
 /** Nachrichtenliste + Eingabezeile für den ausgewählten Textkanal. */
 export default function ChatView({ channel }: ChatViewProps) {
   const user = useAuthStore((s) => s.user);
+  const myPermissions = useServersStore((s) => s.selectedServer?.myPermissions ?? '0');
   const chan = useMessagesStore((s) => s.byChannel[channel.id]);
   const loadHistory = useMessagesStore((s) => s.loadHistory);
   const loadOlder = useMessagesStore((s) => s.loadOlder);
@@ -131,13 +133,23 @@ export default function ChatView({ channel }: ChatViewProps) {
             {error}
           </p>
         )}
-        <input
-          className="w-full rounded-lg border border-zinc-600 bg-zinc-900 px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={`Nachricht an #${channel.name}`}
-          maxLength={4000}
-        />
+        {/* Die UI blendet nur aus – blockiert wird serverseitig (403). */}
+        {hasPermission(permissionsFromString(myPermissions), Permissions.SendMessages) ? (
+          <input
+            className="w-full rounded-lg border border-zinc-600 bg-zinc-900 px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={`Nachricht an #${channel.name}`}
+            maxLength={4000}
+          />
+        ) : (
+          <p
+            className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-4 py-2.5 text-sm text-zinc-500"
+            data-testid="no-send-permission"
+          >
+            Du hast keine Berechtigung, in #{channel.name} zu schreiben.
+          </p>
+        )}
       </form>
     </main>
   );

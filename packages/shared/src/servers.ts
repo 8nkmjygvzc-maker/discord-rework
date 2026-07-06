@@ -1,4 +1,5 @@
 /** Typen für Server, Kanäle und Mitgliedschaften (Phase 3). */
+import type { RoleInfo } from './permissions';
 
 export type ChannelType = 'TEXT' | 'VOICE' | 'VIDEO' | 'DM';
 
@@ -15,6 +16,8 @@ export interface ServerMember {
   username: string;
   nickname: string | null;
   joinedAt: string;
+  /** Zugewiesene Rollen (ohne die implizite Standardrolle). */
+  roleIds: string[];
 }
 
 export interface ChannelInfo {
@@ -31,6 +34,9 @@ export interface ChannelInfo {
 export interface ServerDetails extends ServerSummary {
   channels: ChannelInfo[];
   members: ServerMember[];
+  roles: RoleInfo[];
+  /** Effektive Rechte des anfragenden Nutzers (Bitfield als String). */
+  myPermissions: string;
 }
 
 export interface CreateServerRequest {

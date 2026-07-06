@@ -42,6 +42,23 @@ export default function MembersPanel() {
               <span className="truncate text-sm text-zinc-300">
                 {member.nickname ?? member.username}
               </span>
+              {/* Rollen-Badges (ohne Standardrolle) */}
+              {member.roleIds.length > 0 && (
+                <span className="flex min-w-0 gap-1">
+                  {member.roleIds.map((roleId) => {
+                    const role = server.roles.find((r) => r.id === roleId);
+                    return role ? (
+                      <span
+                        key={roleId}
+                        className="truncate rounded bg-zinc-800 px-1 text-[10px] text-zinc-400"
+                        style={role.color ? { color: role.color } : undefined}
+                      >
+                        {role.name}
+                      </span>
+                    ) : null;
+                  })}
+                </span>
+              )}
               {member.userId === server.ownerId && (
                 <span title="Server-Eigentümer" className="ml-auto text-xs">
                   👑

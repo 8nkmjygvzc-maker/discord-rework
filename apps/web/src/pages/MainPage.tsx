@@ -4,6 +4,7 @@ import ServerRail from '../components/ServerRail';
 import ChannelSidebar from '../components/ChannelSidebar';
 import MembersPanel from '../components/MembersPanel';
 import ChatView from '../components/ChatView';
+import RolesDialog from '../components/RolesDialog';
 import Modal from '../components/Modal';
 import { ApiError } from '../lib/api';
 
@@ -11,7 +12,7 @@ interface MainPageProps {
   onOpenProfile: () => void;
 }
 
-type DialogKind = 'createServer' | 'joinServer' | 'createChannel' | null;
+type DialogKind = 'createServer' | 'joinServer' | 'createChannel' | 'roles' | null;
 
 /** Hauptansicht nach dem Login: Server-Leiste, Kanäle, Inhalt, Mitglieder. */
 export default function MainPage({ onOpenProfile }: MainPageProps) {
@@ -48,6 +49,7 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
           <ChannelSidebar
             onCreateChannel={() => setDialog('createChannel')}
             onOpenProfile={onOpenProfile}
+            onOpenRoles={() => setDialog('roles')}
           />
 
           {channel ? (
@@ -65,6 +67,7 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
       {dialog === 'createServer' && <CreateServerDialog onClose={() => setDialog(null)} />}
       {dialog === 'joinServer' && <JoinServerDialog onClose={() => setDialog(null)} />}
       {dialog === 'createChannel' && <CreateChannelDialog onClose={() => setDialog(null)} />}
+      {dialog === 'roles' && <RolesDialog onClose={() => setDialog(null)} />}
     </div>
   );
 }

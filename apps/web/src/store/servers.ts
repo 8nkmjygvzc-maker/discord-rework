@@ -1,8 +1,10 @@
 import { create } from 'zustand';
-import type {
+import {
   ChannelDeletePayload,
   ChannelInfo,
   GatewayEventType,
+  permissionsFromString,
+  RoleInfo,
   ServerDeletePayload,
   ServerDetails,
   ServerMember,
@@ -27,6 +29,14 @@ interface ServersState {
   deleteServer: (serverId: string) => Promise<void>;
   createChannel: (name: string) => Promise<void>;
   deleteChannel: (channelId: string) => Promise<void>;
+
+  createRole: (name: string) => Promise<void>;
+  updateRole: (roleId: string, changes: { name?: string; permissions?: string }) => Promise<void>;
+  deleteRole: (roleId: string) => Promise<void>;
+  setMemberRole: (userId: string, roleId: string, assign: boolean) => Promise<void>;
+
+  /** Effektive eigene Rechte im ausgewählten Server (0n ohne Auswahl). */
+  myPermissions: () => bigint;
 
   /** Echtzeit-Updates aus dem Gateway (siehe lib/gatewayConnection.ts). */
   handleGatewayEvent: (t: GatewayEventType, d: unknown) => void;
@@ -132,6 +142,41 @@ export const useServersStore = create<ServersState>()((set, get) => ({
     } satisfies ChannelDeletePayload);
   },
 
+  createRole: async (name) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    const role = await authFetch<RoleInfo>(`/api/servers/${serverId}/roles`, {
+      method: 'POST',
+      body: { name },
+    });
+    get().handleGatewayEvent('ROLE_CREATE', { role });
+  },
+
+  updateRole: async (roleId, changes) => {
+    await authFetch<RoleInfo>(`/api/roles/${roleId}`, { method: 'PATCH', body: changes });
+    // ROLE_UPDATE-Event lädt die Details neu (eigene Rechte können sich ändern).
+  },
+
+  deleteRole: async (roleId) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/roles/${roleId}`, { method: 'DELETE' });
+    get().handleGatewayEvent('ROLE_DELETE', { serverId, roleId });
+  },
+
+  setMemberRole: async (userId, roleId, assign) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/servers/${serverId}/members/${userId}/roles/${roleId}`, {
+      method: assign ? 'PUT' : 'DELETE',
+    });
+  },
+
+  myPermissions: () => {
+    const details = get().selectedServer;
+    return details ? permissionsFromString(details.myPermissions) : 0n;
+  },
+
   handleGatewayEvent: (t, d) => {
     switch (t) {
       case 'SERVER_UPDATE': {
@@ -186,6 +231,51 @@ export const useServersStore = create<ServersState>()((set, get) => ({
                 selectedServer: {
                   ...s.selectedServer,
                   members: s.selectedServer.members.filter((m) => m.userId !== userId),
+                },
+              }
+            : {},
+        );
+        return;
+      }
+      case 'ROLE_CREATE': {
+        const { role } = d as { role: RoleInfo };
+        set((s) =>
+          s.selectedServer?.id === role.serverId
+            ? {
+                selectedServer: {
+                  ...s.selectedServer,
+                  roles: [...s.selectedServer.roles.filter((r) => r.id !== role.id), role],
+                },
+              }
+            : {},
+        );
+        return;
+      }
+      case 'ROLE_UPDATE':
+      case 'MEMBER_ROLES_UPDATE': {
+        // Berechtigungsänderungen können die eigenen Rechte betreffen →
+        // Details (inkl. myPermissions) frisch vom Server holen.
+        const serverId =
+          (d as { serverId?: string }).serverId ??
+          (d as { role?: RoleInfo }).role?.serverId ??
+          null;
+        if (serverId && get().selectedServer?.id === serverId) {
+          void get().selectServer(serverId);
+        }
+        return;
+      }
+      case 'ROLE_DELETE': {
+        const { serverId, roleId } = d as { serverId: string; roleId: string };
+        set((s) =>
+          s.selectedServer?.id === serverId
+            ? {
+                selectedServer: {
+                  ...s.selectedServer,
+                  roles: s.selectedServer.roles.filter((r) => r.id !== roleId),
+                  members: s.selectedServer.members.map((m) => ({
+                    ...m,
+                    roleIds: m.roleIds.filter((id) => id !== roleId),
+                  })),
                 },
               }
             : {},

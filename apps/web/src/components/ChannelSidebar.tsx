@@ -1,3 +1,4 @@
+import { hasPermission, Permissions, permissionsFromString } from '@parley/shared';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
 import { usePresenceStore } from '../store/presence';
@@ -5,10 +6,15 @@ import { usePresenceStore } from '../store/presence';
 interface ChannelSidebarProps {
   onCreateChannel: () => void;
   onOpenProfile: () => void;
+  onOpenRoles: () => void;
 }
 
 /** Mittlere Spalte: Server-Kopf, Kanalliste, eigenes Nutzer-Panel unten. */
-export default function ChannelSidebar({ onCreateChannel, onOpenProfile }: ChannelSidebarProps) {
+export default function ChannelSidebar({
+  onCreateChannel,
+  onOpenProfile,
+  onOpenRoles,
+}: ChannelSidebarProps) {
   const user = useAuthStore((s) => s.user);
   const connected = usePresenceStore((s) => s.connected);
   const server = useServersStore((s) => s.selectedServer);
@@ -20,6 +26,9 @@ export default function ChannelSidebar({ onCreateChannel, onOpenProfile }: Chann
 
   if (!user) return null;
   const isOwner = server?.ownerId === user.id;
+  const myPerms = server ? permissionsFromString(server.myPermissions) : 0n;
+  const canManageChannels = hasPermission(myPerms, Permissions.ManageChannels);
+  const canManageRoles = hasPermission(myPerms, Permissions.ManageRoles);
 
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-zinc-900">
@@ -34,6 +43,16 @@ export default function ChannelSidebar({ onCreateChannel, onOpenProfile }: Chann
             className="ml-auto rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
           >
             ID
+          </button>
+        )}
+        {server && canManageRoles && (
+          <button
+            type="button"
+            title="Rollen verwalten"
+            onClick={onOpenRoles}
+            className="rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+          >
+            Rollen
           </button>
         )}
         {server &&
@@ -70,7 +89,7 @@ export default function ChannelSidebar({ onCreateChannel, onOpenProfile }: Chann
               <span className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
                 Textkanäle
               </span>
-              {isOwner && (
+              {canManageChannels && (
                 <button
                   type="button"
                   title="Kanal erstellen"
@@ -95,7 +114,7 @@ export default function ChannelSidebar({ onCreateChannel, onOpenProfile }: Chann
                   >
                     <span className="text-zinc-500">#</span>
                     <span className="truncate">{channel.name}</span>
-                    {isOwner && server.channels.length > 1 && (
+                    {canManageChannels && server.channels.length > 1 && (
                       <span
                         role="button"
                         title="Kanal löschen"

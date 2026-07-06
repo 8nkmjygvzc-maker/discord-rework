@@ -5,24 +5,38 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Channel, Membership, Server, User } from '@prisma/client';
-import type { ChannelInfo, ServerDetails, ServerMember, ServerSummary } from '@parley/shared';
+import {
+  ChannelInfo,
+  DEFAULT_ROLE_PERMISSIONS,
+  Permissions,
+  permissionsToString,
+  ServerDetails,
+  ServerMember,
+  ServerSummary,
+} from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { PermissionsService } from '../roles/permissions.service';
+import { toRoleInfo } from '../roles/roles.service';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 
-type MembershipWithUser = Membership & { user: Pick<User, 'username'> };
+type MembershipWithUser = Membership & {
+  user: Pick<User, 'username'>;
+  roles: { roleId: string }[];
+};
 
 @Injectable()
 export class ServersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
+    private readonly permissions: PermissionsService,
   ) {}
 
-  /** Legt Server + Owner-Mitgliedschaft + Standardkanal in einer Transaktion an. */
+  /** Legt Server + Owner-Mitgliedschaft + Standardkanal + Standardrolle an. */
   async createServer(userId: string, dto: CreateServerDto): Promise<ServerDetails> {
     const server = await this.prisma.server.create({
       data: {
@@ -30,6 +44,13 @@ export class ServersService {
         ownerId: userId,
         members: { create: { userId } },
         channels: { create: { name: 'allgemein', position: 0 } },
+        roles: {
+          create: {
+            name: 'Mitglied',
+            isDefault: true,
+            permissions: DEFAULT_ROLE_PERMISSIONS,
+          },
+        },
       },
     });
     return this.getServerDetails(server.id, userId);
@@ -45,24 +66,36 @@ export class ServersService {
     return memberships.map((m) => toServerSummary(m.server));
   }
 
-  /** Vollansicht inkl. Kanälen und Mitgliedern – nur für Mitglieder. */
+  /** Vollansicht inkl. Kanälen, Mitgliedern, Rollen – nur für Mitglieder. */
   async getServerDetails(serverId: string, userId: string): Promise<ServerDetails> {
-    const server = await this.requireMembership(serverId, userId);
-    const [channels, members] = await Promise.all([
+    const granted = await this.permissions.getMemberPermissions(serverId, userId);
+    if (granted === null) throw new NotFoundException('Server nicht gefunden');
+
+    const server = await this.prisma.server.findUniqueOrThrow({ where: { id: serverId } });
+    const [channels, members, roles] = await Promise.all([
       this.prisma.channel.findMany({
         where: { serverId },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
       }),
       this.prisma.membership.findMany({
         where: { serverId },
-        include: { user: { select: { username: true } } },
+        include: {
+          user: { select: { username: true } },
+          roles: { select: { roleId: true } },
+        },
         orderBy: { joinedAt: 'asc' },
+      }),
+      this.prisma.role.findMany({
+        where: { serverId },
+        orderBy: [{ isDefault: 'desc' }, { position: 'asc' }],
       }),
     ]);
     return {
       ...toServerSummary(server),
       channels: channels.map(toChannelInfo),
       members: members.map(toServerMember),
+      roles: roles.map(toRoleInfo),
+      myPermissions: permissionsToString(granted),
     };
   }
 
@@ -71,7 +104,7 @@ export class ServersService {
     userId: string,
     dto: UpdateServerDto,
   ): Promise<ServerSummary> {
-    await this.requireOwner(serverId, userId);
+    await this.permissions.requirePermission(serverId, userId, Permissions.ManageServer);
     const server = await this.prisma.server.update({ where: { id: serverId }, data: dto });
     const summary = toServerSummary(server);
     await this.gateway.publishDispatch(
@@ -82,8 +115,13 @@ export class ServersService {
     return summary;
   }
 
+  /** Löschen bleibt bewusst dem Owner vorbehalten – auch Admins dürfen das nicht. */
   async deleteServer(serverId: string, userId: string): Promise<void> {
-    await this.requireOwner(serverId, userId);
+    const server = await this.prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) throw new NotFoundException('Server nicht gefunden');
+    if (server.ownerId !== userId) {
+      throw new ForbiddenException('Nur der Server-Eigentümer darf den Server löschen');
+    }
     // Empfänger VOR dem Löschen einsammeln – danach gibt es keine Mitglieder mehr.
     const memberIds = await this.memberIds(serverId);
     await this.prisma.server.delete({ where: { id: serverId } });
@@ -102,7 +140,7 @@ export class ServersService {
 
     const membership = await this.prisma.membership.create({
       data: { userId, serverId },
-      include: { user: { select: { username: true } } },
+      include: { user: { select: { username: true } }, roles: { select: { roleId: true } } },
     });
     await this.gateway.publishDispatch(
       'SERVER_MEMBER_ADD',
@@ -113,8 +151,12 @@ export class ServersService {
   }
 
   async leave(serverId: string, userId: string): Promise<void> {
-    const server = await this.requireMembership(serverId, userId);
-    if (server.ownerId === userId) {
+    const membership = await this.prisma.membership.findUnique({
+      where: { userId_serverId: { userId, serverId } },
+      include: { server: { select: { ownerId: true } } },
+    });
+    if (!membership) throw new NotFoundException('Server nicht gefunden');
+    if (membership.server.ownerId === userId) {
       throw new ForbiddenException(
         'Der Eigentümer kann den Server nicht verlassen – lösche ihn oder übertrage ihn (später)',
       );
@@ -132,7 +174,7 @@ export class ServersService {
     userId: string,
     dto: CreateChannelDto,
   ): Promise<ChannelInfo> {
-    await this.requireOwner(serverId, userId);
+    await this.permissions.requirePermission(serverId, userId, Permissions.ManageChannels);
     const last = await this.prisma.channel.findFirst({
       where: { serverId },
       orderBy: { position: 'desc' },
@@ -156,7 +198,7 @@ export class ServersService {
     dto: UpdateChannelDto,
   ): Promise<ChannelInfo> {
     const channel = await this.requireServerChannel(channelId);
-    await this.requireOwner(channel.serverId!, userId);
+    await this.permissions.requirePermission(channel.serverId!, userId, Permissions.ManageChannels);
     const updated = await this.prisma.channel.update({ where: { id: channelId }, data: dto });
     const info = toChannelInfo(updated);
     await this.gateway.publishDispatch(
@@ -169,7 +211,7 @@ export class ServersService {
 
   async deleteChannel(channelId: string, userId: string): Promise<void> {
     const channel = await this.requireServerChannel(channelId);
-    await this.requireOwner(channel.serverId!, userId);
+    await this.permissions.requirePermission(channel.serverId!, userId, Permissions.ManageChannels);
     await this.prisma.channel.delete({ where: { id: channelId } });
     await this.gateway.publishDispatch(
       'CHANNEL_DELETE',
@@ -178,29 +220,7 @@ export class ServersService {
     );
   }
 
-  // --- Zugriffs-Helfer -------------------------------------------------------
-
-  /**
-   * Bewusst dieselbe 404 für „Server existiert nicht“ und „kein Mitglied“:
-   * Nicht-Mitglieder sollen nicht erraten können, welche Server-IDs existieren.
-   */
-  private async requireMembership(serverId: string, userId: string): Promise<Server> {
-    const membership = await this.prisma.membership.findUnique({
-      where: { userId_serverId: { userId, serverId } },
-      include: { server: true },
-    });
-    if (!membership) throw new NotFoundException('Server nicht gefunden');
-    return membership.server;
-  }
-
-  /** Verwaltungsaktionen sind bis Phase 5 (Rollen) dem Owner vorbehalten. */
-  private async requireOwner(serverId: string, userId: string): Promise<Server> {
-    const server = await this.requireMembership(serverId, userId);
-    if (server.ownerId !== userId) {
-      throw new ForbiddenException('Nur der Server-Eigentümer darf das');
-    }
-    return server;
-  }
+  // --- Helfer ----------------------------------------------------------------
 
   private async requireServerChannel(channelId: string): Promise<Channel> {
     const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
@@ -247,5 +267,6 @@ function toServerMember(m: MembershipWithUser): ServerMember {
     username: m.user.username,
     nickname: m.nickname,
     joinedAt: m.joinedAt.toISOString(),
+    roleIds: m.roles.map((r) => r.roleId),
   };
 }
