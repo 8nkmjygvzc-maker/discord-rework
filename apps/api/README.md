@@ -110,6 +110,26 @@ liegengebliebene Umschläge des Nutzers werden verworfen (unlesbar geworden).
 Live zugestellte Umschläge kommen zusätzlich als `KEY_ENVELOPE`-Gateway-Event.
 v1 = genau ein Gerät pro Account (`Device.userId` unique, Multi-Device: ROADMAP).
 
+## Verschlüsselte Anhänge (Phase 8)
+
+Anhänge verschlüsselt der Client mit einem frischen Zufallsschlüssel pro Datei;
+der Server speichert nur den Ciphertext-Blob in MinIO (`storage/`-Modul) plus
+ID und Blob-Größe in der DB. Dateiname, MIME-Typ, Klartextgröße und
+Dateischlüssel reisen IM E2EE-Nachrichtentext (`MessageContentV1` in
+`@parley/shared`) – der Server sieht sie nie.
+
+| Methode | Pfad                            | Zweck                                                                              |
+| ------- | ------------------------------- | ---------------------------------------------------------------------------------- |
+| POST    | `/api/channels/:id/attachments` | Ciphertext-Blob hochladen (`application/octet-stream`, ≤ 10 MiB, Recht wie Senden) |
+| GET     | `/api/attachments/:id`          | Blob streamen (nur Kanal-Mitglieder; ungebundene Blobs: nur der Uploader)          |
+
+Beim Senden bindet `POST /messages` die `attachmentIds` transaktional an die
+Nachricht – nur eigene, noch unverbrauchte Uploads DESSELBEN Kanals, max. 10
+pro Nachricht; schlägt das Binden fehl, wird auch die Nachricht zurückgerollt.
+Aufräumen: nie gebundene Uploads entsorgt ein periodischer Job (beim Start und
+stündlich, Frist 6 h); Kanal-/Server-Löschung entfernt die Blobs des Kanals
+best-effort aus MinIO (`StorageService.removeAllWithPrefix`).
+
 ## Datenbank
 
 ```bash

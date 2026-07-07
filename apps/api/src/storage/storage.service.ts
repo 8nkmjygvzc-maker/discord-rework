@@ -46,4 +46,24 @@ export class StorageService implements OnModuleInit {
   removeObject(objectKey: string): Promise<void> {
     return this.client.removeObject(this.bucket, objectKey);
   }
+
+  /**
+   * Alle Objekte unter einem Prefix löschen (objectKey = "channelId/uuid" →
+   * Prefix "channelId/"). Räumt beim Löschen eines Kanals/Servers auch Blobs
+   * ab, deren DB-Zeile die Cascade bereits entfernt hat.
+   */
+  async removeAllWithPrefix(prefix: string): Promise<void> {
+    const objectKeys: string[] = [];
+    const listing = this.client.listObjectsV2(this.bucket, prefix, true);
+    await new Promise<void>((resolve, reject) => {
+      listing.on('data', (obj) => {
+        if (obj.name) objectKeys.push(obj.name);
+      });
+      listing.on('error', reject);
+      listing.on('end', resolve);
+    });
+    if (objectKeys.length > 0) {
+      await this.client.removeObjects(this.bucket, objectKeys);
+    }
+  }
 }

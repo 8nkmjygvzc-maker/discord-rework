@@ -34,12 +34,13 @@ export class MessageHeaderDto {
 
 /**
  * Seit Phase 6 nimmt der Server nur noch Ciphertext an – er kann und soll
- * Inhalte nicht prüfen. Größenlimits verhindern Missbrauch als Datei-Ablage
- * (4000 Zeichen Klartext ≈ 5,5 KiB Base64; Limit lässt Luft für UTF-8).
+ * Inhalte nicht prüfen. Größenlimits verhindern Missbrauch als Datei-Ablage.
+ * Worst Case: 4000 Zeichen à 4 Byte UTF-8 + 10 Anhangs-Metadaten (Phase 8,
+ * inkl. Dateischlüssel und langer Namen) ≈ 28 KiB Base64 → 32 KiB lässt Luft.
  */
 export class SendMessageDto {
   @IsString()
-  @Length(1, 24576)
+  @Length(1, 32768)
   ciphertext!: string;
 
   @IsString()

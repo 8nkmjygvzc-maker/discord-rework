@@ -33,7 +33,10 @@
 - **Sender-Key-Verteilung skaliert linear (Phase 6):** Beim Senden wird pro Mitglied das Schlüsselbündel geprüft (60-s-Cache) und bei Bedarf ein Umschlag verschickt – bei sehr großen Servern viele Requests. Später: `DEVICE_KEYS_CHANGED`-Gateway-Event statt Polling, Umschläge bündeln
 - ~~Umschläge an beliebige Nutzer~~ ✓ mit Phase 7 erledigt: `POST /api/envelopes` UND `GET /users/:id/keys` verlangen jetzt den Sichtbarkeitskreis (Freunde, gemeinsame Server, bestehende DMs); 404 statt 403 gegen Nutzer-Enumeration
 - **Skipped-Message-Keys im Double Ratchet** werden pro Kettenwechsel begrenzt (MAX_SKIP), aber nie global aufgeräumt – bei sehr langlebigen Sessions irgendwann beschneiden (Signal löscht nach Zeit/Anzahl)
-- **E2EE-Testnutzer:** Die Verifikationsläufe von Phase 6 haben `charlie_…`-Wegwerf-Nutzer in der Dev-DB hinterlassen (Testserver wurden gelöscht; einen User-Lösch-Endpunkt gibt es noch nicht – kommt spätestens mit dem DSGVO-Löschkonzept)
+- **E2EE-Testnutzer:** Die Verifikationsläufe von Phase 6 haben `charlie_…`-Wegwerf-Nutzer in der Dev-DB hinterlassen (Testserver wurden gelöscht; einen User-Lösch-Endpunkt gibt es noch nicht – kommt spätestens mit dem DSGVO-Löschkonzept). Phase 8 kam mit `p8…`-Nutzern dazu
+- **Anhänge: kein Speicher-Kontingent (Phase 8):** Pro Nutzer greifen nur das Rate-Limit (30 Uploads/min), das 10-MiB-Limit und der Aufräum-Job für nie gebundene Uploads (Frist 6 h, läuft beim Start und stündlich). Ein echtes Quota pro Nutzer/Server fehlt – vor echtem Mehrbenutzer-Betrieb nachziehen
+- **Anhang-Upload puffert im RAM (Phase 8):** Der Blob (max. 10 MiB) läuft komplett durch die API (`express.raw`-Buffer). Bei Skalierung auf presigned URLs umstellen (Client lädt direkt zu MinIO hoch/herunter, API vergibt nur noch signierte Links) – spart API-RAM und -Bandbreite
+- **MinIO ohne TLS im Dev** (`MINIO_USE_SSL=false`): vor einem echten Deployment aktivieren bzw. die Verbindung am Reverse-Proxy terminieren
 
 ## Auth – bewusst auf später verschoben (Stand Phase 1)
 
@@ -56,7 +59,7 @@
 - **Gateway-Events vs. ViewChannels:** `MESSAGE_CREATE` geht seit Phase 5 nur an Mitglieder mit ViewChannels (`getMemberIdsWithPermission`); Struktur-Events (`CHANNEL_*`, `ROLE_*`, `SERVER_MEMBER_*`) gehen weiterhin an alle Mitglieder – unkritisch, solange Rechte nur serverweit gelten, bei Kanal-Overwrites neu bewerten
 - **UI-Feinschliff Rollen:** Rollenfarben wirken bisher nur auf Badges im Mitglieder-Panel, nicht auf Namen im Chat
 - **Beitritt per Server-ID** (Phase 3) ist bewusst primitiv – jeder mit der ID kann beitreten. Phase 12 ersetzt das durch Invite-Links mit Ablauf/Limit; danach den offenen Join-Endpunkt absichern oder entfernen
-- **Nachrichten bearbeiten/löschen:** Datenmodell ist vorbereitet (`editedAt`), UI/Endpunkte fehlen noch – sinnvoll zusammen mit Phase 9 (Reaktionen/Threads) oder 13 (Moderation: fremde Nachrichten löschen)
+- **Nachrichten bearbeiten/löschen:** Datenmodell ist vorbereitet (`editedAt`), UI/Endpunkte fehlen noch – sinnvoll zusammen mit Phase 9 (Reaktionen/Threads) oder 13 (Moderation: fremde Nachrichten löschen). Achtung bei der Umsetzung: Beim Löschen einer Nachricht müssen auch die gebundenen MinIO-Blobs entsorgt werden (Phase 8) – aktuell räumen nur Kanal-/Server-Löschung und der Orphan-Job auf, die DB-Cascade allein ließe Blobs verwaisen
 - **DM-Ungelesen-Anzeige fehlt (Phase 7):** Kommt eine DM an, während der Kanal nicht geöffnet ist, gibt es keinen Badge/Hinweis – sinnvoll zusammen mit Phase 12 (Benachrichtigungen)
 - **Blockieren lässt die DM-History lesbar (Phase 7, bewusste Entscheidung):** Eine Blockierung sperrt nur das SENDEN in beide Richtungen; bereits ausgetauschte Nachrichten bleiben für beide lesbar (wie bei Discord). Gruppen-DMs (mehr als zwei Teilnehmer) sind vorbereitet (`DmMember` ist n:m), aber bewusst nicht umgesetzt
 - ~~Presence global statt gescoped~~ ✓ mit Phase 7 erledigt: READY-Snapshot und PRESENCE_UPDATE gehen nur noch an den Sichtbarkeitskreis (Freunde, gemeinsame Server, DM-Partner); PRESENCE_SYNC liefert additiv nach, wenn der Kreis wächst (Server-Beitritt, neue Freundschaft)

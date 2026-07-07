@@ -1,10 +1,21 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { AttachmentInfo, MAX_ATTACHMENT_CIPHERTEXT_BYTES } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { ChannelAccessService } from '../messages/channel-access.service';
+
+/** Nie an eine Nachricht gebundene Uploads gelten nach dieser Frist als aufgegeben. */
+const ABANDONED_UPLOAD_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 /**
  * Verschlüsselte Anhänge (Phase 8). Ablauf: Client verschlüsselt die Datei mit
@@ -13,16 +24,40 @@ import { ChannelAccessService } from '../messages/channel-access.service';
  * wandert im E2EE-Nachrichtentext. Der Server sieht nur Blob + Größe.
  */
 @Injectable()
-export class AttachmentsService {
+export class AttachmentsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(AttachmentsService.name);
+  private cleanupTimer: NodeJS.Timeout | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly channelAccess: ChannelAccessService,
   ) {}
 
+  /**
+   * Ohne Aufräumen wären Uploads, deren Nachricht nie gesendet wurde,
+   * kostenloser (Ciphertext-)Speicherplatz ohne Limit – der Job entsorgt sie
+   * einmal beim Start und dann periodisch. unref(): Der Timer soll das
+   * Beenden des Prozesses nicht blockieren.
+   */
+  onModuleInit(): void {
+    const run = (): void => {
+      this.cleanupAbandonedUploads().catch((err: unknown) => {
+        this.logger.warn(`Aufräumen aufgegebener Uploads fehlgeschlagen: ${String(err)}`);
+      });
+    };
+    run();
+    this.cleanupTimer = setInterval(run, CLEANUP_INTERVAL_MS);
+    this.cleanupTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+  }
+
   /** Upload in einen Kanal – gleiche Berechtigung wie Nachricht senden. */
   async upload(channelId: string, userId: string, data: Buffer): Promise<AttachmentInfo> {
-    await this.channelAccess.requireChannelAccess(channelId, userId, 'send');
+    await this.channelAccess.requireChannelAccess(channelId, userId, 'upload');
     if (data.length === 0) throw new BadRequestException('Leerer Anhang');
     if (data.length > MAX_ATTACHMENT_CIPHERTEXT_BYTES) {
       throw new BadRequestException('Anhang ist zu groß (max. 10 MiB)');
@@ -57,5 +92,35 @@ export class AttachmentsService {
     await this.channelAccess.requireChannelAccess(attachment.channelId, userId, 'read');
     const stream = await this.storage.getObjectStream(attachment.objectKey);
     return { stream, sizeBytes: attachment.sizeBytes };
+  }
+
+  /**
+   * Aufgegebene Uploads (nie gebunden, älter als die Frist) löschen.
+   * Reihenfolge pro Anhang: erst die DB-Zeile bedingt löschen (messageId muss
+   * noch null sein – schützt gegen ein Binden im selben Moment), erst danach
+   * den Blob. Schlägt das Blob-Löschen fehl, bleibt nur unlesbarer Ciphertext
+   * ohne DB-Zeile zurück (geloggt, kein erneuter Versuch möglich).
+   */
+  async cleanupAbandonedUploads(): Promise<number> {
+    const cutoff = new Date(Date.now() - ABANDONED_UPLOAD_MAX_AGE_MS);
+    const abandoned = await this.prisma.attachment.findMany({
+      where: { messageId: null, createdAt: { lt: cutoff } },
+      select: { id: true, objectKey: true },
+      take: 500,
+    });
+    let removed = 0;
+    for (const attachment of abandoned) {
+      const deleted = await this.prisma.attachment.deleteMany({
+        where: { id: attachment.id, messageId: null },
+      });
+      if (deleted.count === 1) {
+        removed += 1;
+        await this.storage.removeObject(attachment.objectKey).catch((err: unknown) => {
+          this.logger.warn(`Blob ${attachment.objectKey} nicht löschbar: ${String(err)}`);
+        });
+      }
+    }
+    if (removed > 0) this.logger.log(`${removed} aufgegebene(n) Upload(s) aufgeräumt`);
+    return removed;
   }
 }

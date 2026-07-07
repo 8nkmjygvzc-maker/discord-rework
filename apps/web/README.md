@@ -20,3 +20,8 @@ Sämtliche Ver-/Entschlüsselung passiert im Browser – der Server sieht nur Ci
 - Multi-Tab-Sicherheit über Web Locks; entschlüsselte Texte leben nur im Speicher (`store/messages.ts`, nie persistiert).
 
 Konsequenz des „ein Gerät pro Account“-Modells (v1): Die Identität hängt am Browser-Profil. Neuer Browser oder gelöschte Site-Daten ⇒ neue Schlüssel, ältere Nachrichten bleiben dauerhaft unlesbar (UI zeigt einen 🔒-Platzhalter). Mitglieder erhalten fehlende Sender-Keys automatisch beim nächsten Senden des Absenders.
+
+## Verschlüsselte Anhänge (Phase 8)
+
+- `src/lib/attachments.ts` – verschlüsselt Dateien (plus Canvas-Thumbnail bei Bildern) mit einem frischen Zufallsschlüssel und lädt nur den Ciphertext hoch; Schlüssel, Dateiname und MIME-Typ reisen ausschließlich im E2EE-Nachrichtentext. Downloads werden im Client entschlüsselt und als Object-URLs gecacht (bei Logout verworfen).
+- `src/components/AttachmentView.tsx` – Bild-Vorschau (Klick = Original speichern) bzw. Datei-Chip mit Speichern-Button. Die Anzeigegröße des Thumbnails wird geklemmt, weil die Maße aus absenderkontrollierten Metadaten stammen.

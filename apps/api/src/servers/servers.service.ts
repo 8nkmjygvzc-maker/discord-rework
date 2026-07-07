@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Channel, Membership, Server, User } from '@prisma/client';
@@ -18,6 +19,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { PresenceService } from '../gateway/presence.service';
 import { PermissionsService } from '../roles/permissions.service';
+import { StorageService } from '../storage/storage.service';
 import { toRoleInfo } from '../roles/roles.service';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
@@ -31,11 +33,14 @@ type MembershipWithUser = Membership & {
 
 @Injectable()
 export class ServersService {
+  private readonly logger = new Logger(ServersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
     private readonly presence: PresenceService,
     private readonly permissions: PermissionsService,
+    private readonly storage: StorageService,
   ) {}
 
   /** Legt Server + Owner-Mitgliedschaft + Standardkanal + Standardrolle an. */
@@ -124,9 +129,15 @@ export class ServersService {
     if (server.ownerId !== userId) {
       throw new ForbiddenException('Nur der Server-Eigentümer darf den Server löschen');
     }
-    // Empfänger VOR dem Löschen einsammeln – danach gibt es keine Mitglieder mehr.
+    // Empfänger und Kanal-IDs VOR dem Löschen einsammeln – die Cascade räumt
+    // gleich Mitglieder und Kanäle (inkl. Attachment-Zeilen) mit ab.
     const memberIds = await this.memberIds(serverId);
+    const channels = await this.prisma.channel.findMany({
+      where: { serverId },
+      select: { id: true },
+    });
     await this.prisma.server.delete({ where: { id: serverId } });
+    this.removeChannelBlobs(channels.map((c) => c.id));
     await this.gateway.publishDispatch('SERVER_DELETE', { serverId }, memberIds);
   }
 
@@ -234,6 +245,7 @@ export class ServersService {
     const channel = await this.requireServerChannel(channelId);
     await this.permissions.requirePermission(channel.serverId!, userId, Permissions.ManageChannels);
     await this.prisma.channel.delete({ where: { id: channelId } });
+    this.removeChannelBlobs([channelId]);
     await this.gateway.publishDispatch(
       'CHANNEL_DELETE',
       { serverId: channel.serverId, channelId },
@@ -242,6 +254,20 @@ export class ServersService {
   }
 
   // --- Helfer ----------------------------------------------------------------
+
+  /**
+   * Anhang-Blobs gelöschter Kanäle aus MinIO entfernen (Phase 8). Best-effort
+   * und bewusst nicht awaited: Die DB-Zeilen sind weg, ein Storage-Fehler soll
+   * das Löschen nicht mehr scheitern lassen – er hinterlässt nur unlesbaren
+   * Ciphertext, dessen Schlüssel mit den Nachrichten verschwunden sind.
+   */
+  private removeChannelBlobs(channelIds: string[]): void {
+    for (const channelId of channelIds) {
+      void this.storage.removeAllWithPrefix(`${channelId}/`).catch((err: unknown) => {
+        this.logger.warn(`Blobs von Kanal ${channelId} nicht aufräumbar: ${String(err)}`);
+      });
+    }
+  }
 
   private async requireServerChannel(channelId: string): Promise<Channel> {
     const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });

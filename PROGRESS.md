@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 7 abgeschlossen (07.07.2026)
+## Status: Phase 8 abgeschlossen (07.07.2026)
 
 ## Erledigt
 
@@ -104,9 +104,21 @@ Wie Phase 5/6 kam die Implementierung als angelieferter Commit (`8cd249e`); dies
 
 **Verifiziert:** Skript mit 41 Checks, alle grün – u. a.: kompletter Anfrage-Lebenszyklus inkl. Gegen-Anfrage-Auto-Accept; Presence-Scoping (Fremde sehen sich weder im READY-Snapshot noch per PRESENCE_UPDATE; neue Freundschaft/Server-Beitritt liefern nach); DM-Policy (Freunde ✓, gemeinsamer Server ✓, Fremde 403, selbst 400, kanonische Kanal-ID von beiden Seiten); E2EE-Roundtrip in beide Richtungen; Blockieren (Senden 403 beidseitig, History lesbar, DM-Öffnen 403, generische 400er, kein Leak zur Gegenseite, Entblocken stellt Senden wieder her); Bundle/Umschlag-Sichtbarkeit. DB-Check: nur Ciphertext, DM-Kanal ohne Server mit dmKey. Interop-Test UI ↔ Skript: Anfrage-Badge live, Annehmen in der UI, verschlüsselte DMs in beide Richtungen lesbar, übersteht Reload (IndexedDB), Konsole sauber. Build/Tests (21)/Lint/Format grün.
 
+### Phase 8 – Datei-/Bild-Uploads (07.07.2026)
+
+Wie Phase 5–7 kam die Implementierung als angelieferter Commit (`c94f9b3`); diese Session hat reviewt, vier Lücken geschlossen und die Phase verifiziert.
+
+- **Prisma:** `Attachment` (channelId, uploaderId, messageId nullable bis zum Senden, objectKey, sizeBytes); Migration `attachments`. **Bewusste Abweichung von CLAUDE.md §5:** kein `mimeType`/`encryptedFileUrl` in der DB – Dateiname, MIME-Typ, Klartextgröße und Dateischlüssel stehen IM E2EE-Nachrichtentext (`MessageContentV1` in `@parley/shared`), der Server sieht nur Blob + Größe
+- **Krypto:** `packages/shared/src/crypto/file.ts` – XChaCha20-Poly1305 mit frischem Zufallsschlüssel pro Datei (Prinzip wie Signal/Matrix-Anhänge); 5 neue Unit-Tests (Datei-Roundtrip, Inhaltsformat inkl. Phase-6/7-Rohtext-Fallback)
+- **API:** `StorageService` (MinIO, Bucket-Anlage beim Start) + `AttachmentsModule`: `POST /channels/:id/attachments` (roher `application/octet-stream`-Body statt Multipart, ≤ 10 MiB + AEAD-Overhead, Rechte wie Senden inkl. DM-Blockierung), `GET /attachments/:id` (Stream, nur Kanal-Mitglieder, ungebunden nur Uploader, 404 für Fremde). Senden bindet `attachmentIds` **transaktional** (nur eigene, unverbrauchte Uploads desselben Kanals, max. 10/Nachricht – sonst Rollback inkl. Nachricht). Zugriffslogik aus `MessagesService` in gemeinsamen `ChannelAccessService` extrahiert
+- **Web-Client:** `lib/attachments.ts` (verschlüsseln → hochladen → Metadaten in den E2EE-Klartext; Bilder bekommen ein Canvas-Thumbnail ≤ 384 px als eigenen verschlüsselten Blob; Download-Cache als Object-URLs, Reset bei Logout), `AttachmentView` (Bild-Vorschau, Klick = Original speichern; Datei-Chip mit Speichern-Button), Datei-Auswahl mit Chips in der Eingabezeile (max. 4 Dateien/Nachricht)
+- **Review-Fixes dieser Session:** (1) Kanal-/Server-Löschung entfernt jetzt auch die MinIO-Blobs (`removeAllWithPrefix`, best-effort nach dem DB-Delete – vorher blieben sie für immer liegen); (2) Aufräum-Job für nie gebundene Uploads (beim Start + stündlich, Frist 6 h; vorher unbegrenzter Gratis-Speicher per Upload-ohne-Senden); (3) Ciphertext-Limit der Nachrichten 24 KiB → 32 KiB (Worst Case 4000 Nicht-ASCII-Zeichen + 10 Anhangs-Metadaten passte nicht); (4) Thumbnail-Anzeigegröße in der UI geklemmt (Maße sind absenderkontrollierte E2EE-Metadaten – manipulierte Werte hätten das Layout gesprengt). Nebenbei: `'upload'`-Intent im `ChannelAccessService` spart die Empfängerliste, die nur das Senden braucht
+
+**Verifiziert:** Skript mit 38 Checks, alle grün – u. a.: Upload-Validierung (leer/zu groß/413/kein octet-stream/Nicht-Mitglied 404); Binde-Regeln (fremd/doppelt/kanalfremd/>10 → 400, Transaktion hinterlässt keine Nachricht); Download-Rechte (Mitglied ✓, Fremder 404, ungebunden nur Uploader); voller E2EE-Roundtrip Skript↔Skript (Blob byte-identisch, Klartext-Marker NICHT im Ciphertext, Datei entschlüsselt identisch); DM-Uploads inkl. Blockierung (403) und Entblocken; DB nur technische Spalten; Blob physisch in MinIO; Kanal-Löschung räumt Blobs ab; Start-Cleanup entsorgt gealterte ungebundene Uploads (DB + MinIO). Interop UI↔Skript: Bild aus der UI (arian) → frieda (Skript) entschlüsselt Text, PNG-Original und JPEG-Thumbnail (Magic Bytes geprüft); friedas verschlüsselte Antwort mit Datei-Chip erscheint live und lesbar in der UI, übersteht Reload (Thumbnail wird neu geladen und entschlüsselt), Konsole sauber. Build/Tests (26)/Lint/Format grün.
+
 ## Nächste Phase
 
-**Phase 8 – Datei-/Bild-Uploads:** Verschlüsselte Anhänge über MinIO (Client verschlüsselt die Datei, lädt Ciphertext hoch; `Attachment`-Modell aus CLAUDE.md Abschnitt 5), Vorschaubilder. MinIO läuft bereits in der Dev-Infra, wird aber erstmals wirklich genutzt (Bucket-Setup, presigned URLs o. Ä. zu entscheiden).
+**Phase 9 – Reaktionen, Threads, Erwähnungen, Suche:** Emoji-Reaktionen, Antwort-Threads, @Erwähnungen mit Benachrichtigung, clientseitige Suche (serverseitig wegen E2EE nicht möglich, siehe ROADMAP). Dabei bietet sich an, das in ROADMAP notierte Bearbeiten/Löschen von Nachrichten mitzudenken (Blob-Aufräumen beim Löschen!).
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 

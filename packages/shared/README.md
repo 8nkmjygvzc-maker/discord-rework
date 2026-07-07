@@ -17,6 +17,7 @@ Ausschließlich geprüfte libsodium-Primitiven, keine eigenen Algorithmen:
 - `ratchet.ts` – Double Ratchet (BLAKE2b-KDF-Ketten, XChaCha20-Poly1305, Header als Associated Data); alle Funktionen pure – Zustand wird erst nach Erfolg persistiert
 - `senderkey.ts` – Sender-Key-Ratchet für Kanäle (Megolm-Prinzip): vorwärts ratchende Kette + Ed25519-Signatur gegen Fälschung durch Mit-Mitglieder; Entschlüsseln ist idempotent (frühester Stand + Vorspulen)
 - `envelope.ts` – Wire-Format der Schlüssel-Umschläge (Sender-Key-Verteilung über 1:1-Sessions)
+- `file.ts` – Datei-Verschlüsselung für Anhänge (Phase 8): XChaCha20-Poly1305 mit frischem Zufallsschlüssel pro Datei; Schlüssel/Nonce wandern im E2EE-Nachrichtentext (`MessageContentV1` in `src/messages.ts`), nie zum Server
 
 Tests: `npm run test -w @parley/shared` (Vitest, `src/crypto/crypto.spec.ts`).
 

@@ -19,7 +19,7 @@ import {
 import { useAuthStore } from '../store/auth';
 
 /** Längste Kante des Vorschaubilds – klein genug für schnelles Laden. */
-const THUMBNAIL_MAX_PX = 384;
+export const THUMBNAIL_MAX_PX = 384;
 /** Bewusst unter dem Server-Limit (10 Blobs/Nachricht, Bilder zählen doppelt). */
 export const MAX_FILES_PER_MESSAGE = 4;
 

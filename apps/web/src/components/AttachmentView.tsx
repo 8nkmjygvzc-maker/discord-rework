@@ -1,6 +1,28 @@
 import { useEffect, useState } from 'react';
 import type { AttachmentMeta } from '@parley/shared';
-import { formatBytes, getDecryptedObjectUrl, saveAttachmentToDisk } from '../lib/attachments';
+import {
+  formatBytes,
+  getDecryptedObjectUrl,
+  saveAttachmentToDisk,
+  THUMBNAIL_MAX_PX,
+} from '../lib/attachments';
+
+/**
+ * Anzeige-Größe des Vorschaubilds. width/height stammen aus den E2EE-Metadaten
+ * des ABSENDERS – ein bösartiges Mitglied könnte dort absurde Werte eintragen,
+ * deshalb hier klemmen statt blind übernehmen (ehrliche Thumbnails sind ohnehin
+ * nie größer als THUMBNAIL_MAX_PX).
+ */
+function thumbnailBoxSize(width: number, height: number): { width: number; height: number } {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return { width: THUMBNAIL_MAX_PX / 2, height: THUMBNAIL_MAX_PX / 2 };
+  }
+  const scale = Math.min(1, THUMBNAIL_MAX_PX / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
 
 /**
  * Ein Anhang in einer Nachricht: Bilder mit entschlüsseltem Vorschaubild
@@ -68,20 +90,21 @@ function ThumbnailButton({ meta, onClick }: { meta: AttachmentMeta; onClick: () 
   if (failed) {
     return <p className="text-xs text-zinc-500 italic">Vorschau konnte nicht geladen werden.</p>;
   }
+  const box = thumbnailBoxSize(thumbnail.width, thumbnail.height);
   return (
     <button
       type="button"
       title={`${meta.name} (${formatBytes(meta.sizeBytes)}) – klicken zum Speichern`}
       onClick={onClick}
       className="block overflow-hidden rounded-lg border border-zinc-700/60 focus:outline-2 focus:outline-indigo-500"
-      style={{ width: thumbnail.width, height: thumbnail.height, maxWidth: '100%' }}
+      style={{ width: box.width, height: box.height, maxWidth: '100%' }}
     >
       {url ? (
         <img
           src={url}
           alt={meta.name}
-          width={thumbnail.width}
-          height={thumbnail.height}
+          width={box.width}
+          height={box.height}
           className="block h-full w-full object-cover"
         />
       ) : (
