@@ -27,6 +27,8 @@ interface ChannelMessages {
 export interface ReactionEventState {
   action: 'add' | 'remove';
   createdAt: string;
+  /** ID des Reaktions-Events – Tiebreaker bei gleichem Server-Zeitstempel. */
+  eventId: string;
   username: string;
 }
 
@@ -245,7 +247,12 @@ async function decryptBatch(
   }
 }
 
-/** Reaktions-Events einfalten: pro (Ziel, Nutzer, Emoji) gewinnt das jüngste. */
+/**
+ * Reaktions-Events einfalten: pro (Ziel, Nutzer, Emoji) gewinnt das jüngste.
+ * Bei gleichem Server-Zeitstempel (Millisekunden-Auflösung!) entscheidet die
+ * Event-ID – sonst könnten Clients je nach Verarbeitungs-Reihenfolge dauerhaft
+ * unterschiedliche Stände zeigen.
+ */
 function foldReactions(
   reactions: MessagesState['reactions'],
   results: { message: MessageInfo; content: DecodedMessageContent }[],
@@ -258,10 +265,17 @@ function foldReactions(
     const byUserEmoji = { ...(next[reaction.targetMessageId] ?? {}) };
     const key = `${message.senderId}|${reaction.emoji}`;
     const existing = byUserEmoji[key];
-    if (existing && existing.createdAt >= message.createdAt) continue;
+    if (
+      existing &&
+      (existing.createdAt > message.createdAt ||
+        (existing.createdAt === message.createdAt && existing.eventId >= message.id))
+    ) {
+      continue;
+    }
     byUserEmoji[key] = {
       action: reaction.action,
       createdAt: message.createdAt,
+      eventId: message.id,
       username: message.senderUsername,
     };
     next[reaction.targetMessageId] = byUserEmoji;

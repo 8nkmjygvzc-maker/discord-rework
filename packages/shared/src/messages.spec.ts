@@ -3,6 +3,7 @@ import {
   decodeMessageContent,
   encodeMessageContent,
   encodeReactionContent,
+  isPlausibleReactionEmoji,
   MAX_REACTION_EMOJI_LENGTH,
   MAX_REPLY_PREVIEW_LENGTH,
 } from './messages';
@@ -78,5 +79,39 @@ describe('Nachrichten-Inhaltsformat (Phase 8/9)', () => {
       reaction: { targetMessageId: 'm1', emoji: '👍', action: 'toggle' },
     });
     expect(decodeMessageContent(badAction).reaction).toBeNull();
+  });
+
+  it('verwirft absenderkontrollierte Message-IDs mit Sonderzeichen', () => {
+    // z. B. Selector-Injektion: `"]` würde ohne Validierung bis in
+    // querySelector(`[data-message-id="…"]`) durchgereicht.
+    const badReply = JSON.stringify({
+      v: 1,
+      text: 'hi',
+      replyTo: { messageId: 'x"]', senderId: 'u1', senderUsername: 'f', preview: 'p' },
+    });
+    expect(decodeMessageContent(badReply).replyTo).toBeNull();
+    const badTarget = JSON.stringify({
+      v: 1,
+      text: '',
+      reaction: { targetMessageId: 'a b', emoji: '👍', action: 'add' },
+    });
+    expect(decodeMessageContent(badTarget).reaction).toBeNull();
+  });
+
+  it('akzeptiert nur plausible Emoji-Sequenzen als Reaktion', () => {
+    // Echte Emojis inkl. ZWJ-Sequenzen, Hautfarben und Keycaps …
+    for (const emoji of ['👍', '❤️', '👩🏽‍💻', '🏳️‍🌈', '1️⃣', '🇩🇪']) {
+      expect(isPlausibleReactionEmoji(emoji), emoji).toBe(true);
+    }
+    // … aber kein Text, keine reinen ASCII-Bausteine, nichts Leeres/Überlanges.
+    for (const bad of ['HELLO', '123', '#', 'a👍', '', ' ', '👍'.repeat(20)]) {
+      expect(isPlausibleReactionEmoji(bad), JSON.stringify(bad)).toBe(false);
+    }
+    const textAsEmoji = JSON.stringify({
+      v: 1,
+      text: '',
+      reaction: { targetMessageId: 'm1', emoji: 'LOL!', action: 'add' },
+    });
+    expect(decodeMessageContent(textAsEmoji).reaction).toBeNull();
   });
 });

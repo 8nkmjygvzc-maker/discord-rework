@@ -25,3 +25,13 @@ Konsequenz des „ein Gerät pro Account“-Modells (v1): Die Identität hängt 
 
 - `src/lib/attachments.ts` – verschlüsselt Dateien (plus Canvas-Thumbnail bei Bildern) mit einem frischen Zufallsschlüssel und lädt nur den Ciphertext hoch; Schlüssel, Dateiname und MIME-Typ reisen ausschließlich im E2EE-Nachrichtentext. Downloads werden im Client entschlüsselt und als Object-URLs gecacht (bei Logout verworfen).
 - `src/components/AttachmentView.tsx` – Bild-Vorschau (Klick = Original speichern) bzw. Datei-Chip mit Speichern-Button. Die Anzeigegröße des Thumbnails wird geklemmt, weil die Maße aus absenderkontrollierten Metadaten stammen.
+
+## Reaktionen, Threads, Erwähnungen, Suche (Phase 9)
+
+Alles Weitere reist ebenfalls IM Ciphertext – der Server sieht weder Emojis noch Antwort-Graphen noch Erwähnungen:
+
+- **Reaktionen** sind verschlüsselte Spezial-Nachrichten (`reaction` in `MessageContentV1`) mit add/remove-Toggle-Semantik. `store/messages.ts` faltet die Events pro (Ziel, Nutzer, Emoji) – das jüngste gewinnt, bei Zeitstempel-Gleichstand entscheidet die Event-ID (deterministisch über alle Clients). Aggregation (Zähler, „von mir“) macht `MessageRow.tsx`; Reaktions-Events erscheinen nicht im Verlauf.
+- **Antworten/Threads**: `replyTo` (Referenz + eingebettete Zitat-Vorschau, Prinzip wie Signal) im Klartext; die Thread-Ansicht in `ChatView.tsx` leitet den Antwort-Graphen clientseitig ab (Wurzelsuche mit Zyklen-Schutz – replyTo ist absenderkontrolliert).
+- **Erwähnungen** (`src/lib/mentions.ts`): reine Textsuche über die bekannten Benutzernamen des Kanals nach dem Entschlüsseln; Browser-Benachrichtigung (`src/lib/notifications.ts`) nur bei erteilter Erlaubnis (🔔-Button) und nicht fokussiertem Tab – echte Push-Benachrichtigungen folgen in Phase 12.
+- **Suche** (🔍): nur im geladenen, bereits entschlüsselten Verlauf – serverseitige Suche ist wegen E2EE prinzipbedingt unmöglich (siehe ROADMAP).
+- Absenderkontrollierte Felder (Emoji, Nachrichten-IDs, Vorschau) werden beim Dekodieren defensiv validiert (`@parley/shared`, `decodeMessageContent`) – kaputte oder böswillige Werte fallen auf `null`.

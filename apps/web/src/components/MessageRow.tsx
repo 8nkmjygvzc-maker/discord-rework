@@ -28,6 +28,11 @@ interface MessageRowProps {
   myUsername: string | null;
   /** Rohe Reaktions-Events auf diese Nachricht (Aggregation passiert hier). */
   reactionEvents: Record<string, ReactionEventState> | undefined;
+  /**
+   * Reaktionen/Antworten sind technisch Nachrichten – ohne Schreibrecht
+   * blendet die UI die Aktionen aus (blockiert wird ohnehin serverseitig).
+   */
+  canSend: boolean;
   hasThread: boolean;
   /** Kurzes Aufleuchten nach „zum Original springen“. */
   flash: boolean;
@@ -48,6 +53,7 @@ export default function MessageRow({
   knownUsernames,
   myUsername,
   reactionEvents,
+  canSend,
   hasThread,
   flash,
   onToggleReaction,
@@ -151,12 +157,13 @@ export default function MessageRow({
                 key={group.emoji}
                 type="button"
                 title={group.usernames.join(', ')}
+                disabled={!canSend}
                 onClick={() => onToggleReaction(group.emoji, group.mine)}
                 className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${
                   group.mine
                     ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300'
-                    : 'border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:border-zinc-500'
-                }`}
+                    : 'border-zinc-700 bg-zinc-800/80 text-zinc-300'
+                } ${canSend ? (group.mine ? '' : 'hover:border-zinc-500') : 'cursor-default'}`}
               >
                 <span>{group.emoji}</span>
                 <span>{group.count}</span>
@@ -167,24 +174,28 @@ export default function MessageRow({
       </div>
 
       {/* Hover-Aktionen: reagieren, antworten, Thread anzeigen */}
-      {content !== undefined && (
+      {content !== undefined && (canSend || hasThread) && (
         <div className="absolute -top-3 right-2 hidden items-center gap-0.5 rounded-lg border border-zinc-700 bg-zinc-900 px-1 py-0.5 shadow group-hover:flex">
-          <button
-            type="button"
-            title="Reagieren"
-            onClick={() => setPickerOpen((open) => !open)}
-            className="rounded px-1.5 py-0.5 text-sm hover:bg-zinc-700"
-          >
-            😊
-          </button>
-          <button
-            type="button"
-            title="Antworten"
-            onClick={onReply}
-            className="rounded px-1.5 py-0.5 text-sm hover:bg-zinc-700"
-          >
-            ↩
-          </button>
+          {canSend && (
+            <>
+              <button
+                type="button"
+                title="Reagieren"
+                onClick={() => setPickerOpen((open) => !open)}
+                className="rounded px-1.5 py-0.5 text-sm hover:bg-zinc-700"
+              >
+                😊
+              </button>
+              <button
+                type="button"
+                title="Antworten"
+                onClick={onReply}
+                className="rounded px-1.5 py-0.5 text-sm hover:bg-zinc-700"
+              >
+                ↩
+              </button>
+            </>
+          )}
           {hasThread && (
             <button
               type="button"

@@ -111,6 +111,27 @@ export interface ReactionContent {
 export const MAX_REACTION_EMOJI_LENGTH = 32;
 export const MAX_REPLY_PREVIEW_LENGTH = 160;
 
+/**
+ * Absenderkontrollierte Nachrichten-Referenzen (replyTo/Reaktions-Ziel) müssen
+ * wie Server-IDs aussehen (UUID-Zeichenvorrat) – alles andere wird verworfen.
+ * Verhindert u. a. Selector-Injektion, wenn die UI per ID Elemente sucht.
+ */
+const MESSAGE_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
+
+/**
+ * Sieht `value` wie eine Emoji-Sequenz aus? Erlaubt sind nur Emoji-Bausteine
+ * (inkl. ZWJ, Variation Selector, Keycap, Hautfarben, Regionalindikatoren),
+ * und mindestens ein Nicht-ASCII-Zeichen muss dabei sein – sonst wären „123“
+ * oder „#“ gültig, obwohl sie nur aus Keycap-BAUSTEINEN bestehen. Reaktionen
+ * sind absenderkontrolliert; ohne diesen Check ließe sich beliebiger kurzer
+ * Text als „Reaktion“ in die UI aller Mitglieder rendern.
+ */
+export function isPlausibleReactionEmoji(value: string): boolean {
+  if (value.length === 0 || value.length > MAX_REACTION_EMOJI_LENGTH) return false;
+  if (!/^[\p{Emoji}\p{Emoji_Component}]+$/u.test(value)) return false;
+  return [...value].some((ch) => (ch.codePointAt(0) ?? 0) > 0x7f);
+}
+
 export interface MessageContentV1 {
   v: 1;
   text: string;
@@ -188,8 +209,7 @@ function sanitizeReplyRef(value: unknown): ReplyRef | null {
   const ref = value as Partial<ReplyRef>;
   if (
     typeof ref.messageId !== 'string' ||
-    ref.messageId.length === 0 ||
-    ref.messageId.length > 64 ||
+    !MESSAGE_ID_PATTERN.test(ref.messageId) ||
     typeof ref.senderId !== 'string' ||
     typeof ref.senderUsername !== 'string' ||
     typeof ref.preview !== 'string'
@@ -209,11 +229,9 @@ function sanitizeReaction(value: unknown): ReactionContent | null {
   const reaction = value as Partial<ReactionContent>;
   if (
     typeof reaction.targetMessageId !== 'string' ||
-    reaction.targetMessageId.length === 0 ||
-    reaction.targetMessageId.length > 64 ||
+    !MESSAGE_ID_PATTERN.test(reaction.targetMessageId) ||
     typeof reaction.emoji !== 'string' ||
-    reaction.emoji.length === 0 ||
-    reaction.emoji.length > MAX_REACTION_EMOJI_LENGTH ||
+    !isPlausibleReactionEmoji(reaction.emoji) ||
     (reaction.action !== 'add' && reaction.action !== 'remove')
   ) {
     return null;

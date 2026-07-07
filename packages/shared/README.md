@@ -19,7 +19,11 @@ Ausschließlich geprüfte libsodium-Primitiven, keine eigenen Algorithmen:
 - `envelope.ts` – Wire-Format der Schlüssel-Umschläge (Sender-Key-Verteilung über 1:1-Sessions)
 - `file.ts` – Datei-Verschlüsselung für Anhänge (Phase 8): XChaCha20-Poly1305 mit frischem Zufallsschlüssel pro Datei; Schlüssel/Nonce wandern im E2EE-Nachrichtentext (`MessageContentV1` in `src/messages.ts`), nie zum Server
 
-Tests: `npm run test -w @parley/shared` (Vitest, `src/crypto/crypto.spec.ts`).
+## Nachrichten-Inhaltsformat (`src/messages.ts`)
+
+`MessageContentV1` ist der strukturierte E2EE-Klartext: Text, Anhangs-Metadaten (Phase 8), Antwort-Bezug `replyTo` und Reaktions-Events `reaction` (Phase 9). `decodeMessageContent` validiert absenderkontrollierte Felder defensiv: Nachrichten-Referenzen müssen wie Server-IDs aussehen (verhindert u. a. Selector-Injektion in der UI), Reaktions-Emojis müssen plausible Emoji-Sequenzen sein (`isPlausibleReactionEmoji` – kein Text-Missbrauch in fremden UIs). Kaputte Felder fallen auf `null`, Rohtexte aus Phase 6/7 bleiben lesbar.
+
+Tests: `npm run test -w @parley/shared` (Vitest, `src/crypto/crypto.spec.ts`, `src/messages.spec.ts`).
 
 ## Build
 

@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 8 abgeschlossen (07.07.2026)
+## Status: Phase 9 abgeschlossen (07.07.2026)
 
 ## Erledigt
 
@@ -116,9 +116,23 @@ Wie Phase 5–7 kam die Implementierung als angelieferter Commit (`c94f9b3`); di
 
 **Verifiziert:** Skript mit 38 Checks, alle grün – u. a.: Upload-Validierung (leer/zu groß/413/kein octet-stream/Nicht-Mitglied 404); Binde-Regeln (fremd/doppelt/kanalfremd/>10 → 400, Transaktion hinterlässt keine Nachricht); Download-Rechte (Mitglied ✓, Fremder 404, ungebunden nur Uploader); voller E2EE-Roundtrip Skript↔Skript (Blob byte-identisch, Klartext-Marker NICHT im Ciphertext, Datei entschlüsselt identisch); DM-Uploads inkl. Blockierung (403) und Entblocken; DB nur technische Spalten; Blob physisch in MinIO; Kanal-Löschung räumt Blobs ab; Start-Cleanup entsorgt gealterte ungebundene Uploads (DB + MinIO). Interop UI↔Skript: Bild aus der UI (arian) → frieda (Skript) entschlüsselt Text, PNG-Original und JPEG-Thumbnail (Magic Bytes geprüft); friedas verschlüsselte Antwort mit Datei-Chip erscheint live und lesbar in der UI, übersteht Reload (Thumbnail wird neu geladen und entschlüsselt), Konsole sauber. Build/Tests (26)/Lint/Format grün.
 
+### Phase 9 – Reaktionen, Threads, Erwähnungen, Suche (07.07.2026)
+
+Wie Phase 5–8 kam die Implementierung als angelieferter Commit (`34d0b6a`); diese Session hat reviewt, fünf Lücken geschlossen und die Phase verifiziert. Kernprinzip: **Alles reist IM Ciphertext** – kein Backend-Change nötig, der Server kann Reaktionen nicht von Textnachrichten unterscheiden und sieht weder Emojis noch Antwort-Graphen noch Erwähnungen.
+
+- **Shared (`MessageContentV1` erweitert):** `replyTo` (Referenz + eingebettete Zitat-Vorschau ≤ 160 Zeichen, Prinzip wie Signal) und `reaction` (targetMessageId, Emoji, add/remove) im E2EE-Klartext; `decodeMessageContent` validiert absenderkontrollierte Felder defensiv (kaputte Felder → null, Rohtext aus Phase 6/7 bleibt lesbar)
+- **Reaktionen:** verschlüsselte Spezial-Nachrichten in derselben Pipeline, Toggle-Semantik; der Store faltet pro (Ziel, Nutzer, Emoji) das jüngste Event ein, `MessageRow` aggregiert (Zähler, „von mir“, Schnellauswahl-Picker mit 8 Emojis); Reaktions-Events erscheinen nicht im Verlauf
+- **Antworten/Threads:** Antwort-Banner in der Eingabezeile, Zitat-Zeile über der Nachricht („Zum Original springen“ mit Aufleuchten), Thread-Ansicht = Wurzel + alle Nachfahren, clientseitig aus den replyTo-Bezügen abgeleitet
+- **Erwähnungen:** clientseitige Erkennung (`@name` gegen bekannte Kanal-Benutzernamen, case-insensitiv), Highlight (gelb) für eigene Erwähnungen, Browser-Notification per Notification-API (🔔-Button, nur bei unfokussiertem Tab; echte Push-Benachrichtigungen folgen in Phase 12)
+- **Suche (🔍):** nur im geladenen, entschlüsselten Verlauf (Text + Anhangs-Namen), mit Treffer-Zähler – serverseitig wegen E2EE prinzipbedingt unmöglich
+- **Review-Fixes dieser Session:** (1) Thread-Wurzelsuche gegen Antwort-Zyklen abgesichert (mit UUID-IDs nicht fälschbar, aber die Terminierung soll nicht von dieser Invariante abhängen); (2) `CSS.escape` + ID-Format-Validierung (`[A-Za-z0-9-]{1,64}`) für absenderkontrollierte Nachrichten-Referenzen – ohne sie hätte ein `"]` in replyTo.messageId den `querySelector` im Click-Handler werfen lassen; (3) Emoji-Plausibilitätscheck (`isPlausibleReactionEmoji`: nur Emoji-Bausteine, nicht rein ASCII) – vorher hätte sich beliebiger 32-Zeichen-Text als „Reaktion“ in fremde UIs rendern lassen; (4) Reaktions-/Antwort-Aktionen ohne SendMessages ausgeblendet (Server blockte schon mit 403, die UI bot die Buttons aber an); (5) Reaktions-Falten deterministisch gemacht (Event-ID als Tiebreaker bei gleichem Millisekunden-Zeitstempel – sonst könnten Clients dauerhaft unterschiedliche Stände zeigen)
+- **Bewusst NICHT in dieser Phase:** Nachrichten bearbeiten/löschen (→ Phase 13, siehe ROADMAP), Erwähnungs-Picker/ID-Erwähnungen, Nachladen des Originals beim Zitat-Klick (alles in ROADMAP notiert)
+
+**Verifiziert:** Shared-Unit-Tests 21 (neu: Emoji-Plausibilität, ID-Validierung, replyTo-Roundtrip). Skript mit 19 Checks, alle grün – u. a. replyTo-Roundtrip mit Preview-Klemmung, Reaktions-add/remove in beide Richtungen (live über Gateway), fünf böswillige Payloads (Text-als-Emoji, ASCII-Bausteine, Selector-Injektion, kaputte IDs, unbekannte action) werden beim Empfänger verworfen, Reaktions-Events liegen als normale Nachrichten in der History. DB-Check: Header eines Reaktions-Events enthält nur `{iteration,keyId,signature,v}`, kein Klartext-/Emoji-/Erwähnungs-Leak in Ciphertext oder Header. Interop UI↔Skript: UI-Nachricht wird vom Skript entschlüsselt; Skript-Antwort (Zitat-Zeile), ❤️-Reaktion (Chip), Erwähnung (gelbes Highlight) und Geist-Zitat auf nicht geladene Nachricht erscheinen live und korrekt in der UI; UI-Reaktion 👍 add→remove kommt beim Skript entschlüsselt und korrekt an; Thread-Ansicht (2 Nachrichten, sauberes Schließen), Sprung-zum-Original mit Aufleuchten, Suche (1 Treffer); Reload: Reaktionen werden aus der History neu gefaltet, Highlight/Zitat intakt; Konsole sauber. Build/Tests (32)/Lint/Format grün.
+
 ## Nächste Phase
 
-**Phase 9 – Reaktionen, Threads, Erwähnungen, Suche:** Emoji-Reaktionen, Antwort-Threads, @Erwähnungen mit Benachrichtigung, clientseitige Suche (serverseitig wegen E2EE nicht möglich, siehe ROADMAP). Dabei bietet sich an, das in ROADMAP notierte Bearbeiten/Löschen von Nachrichten mitzudenken (Blob-Aufräumen beim Löschen!).
+**Phase 10 – Sprachchat:** mediasoup-Integration (`apps/voice` als eigener SFU-Service laut Architektur), Sprachkanäle beitreten/verlassen, Mute/Deafen. Erste Phase mit neuem Teilprojekt – Signaling läuft über das bestehende Gateway/REST, Media über mediasoup. Voice ist zunächst nur transportverschlüsselt (DTLS-SRTP), E2EE für Medien steht in der ROADMAP.
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 
@@ -136,7 +150,7 @@ Diese Maschine war frisch aufgesetzt (kein Node, kein Docker, WSL defekt). Docke
 - Projektname „Parley“ ist nur Arbeitstitel (siehe ROADMAP.md)
 - Node ist NICHT systemweit installiert – falls `node` im PATH fehlt: `%LOCALAPPDATA%\Programs\nodejs`
 - Server starten: Preview-Panel-Konfigurationen `api`/`web` (`.claude/launch.json`, nutzen `scripts/dev-*.cmd`) oder `npm run dev:api` / `npm run dev:web`
-- Infrastruktur: `docker compose -f infra/docker-compose.yml up -d` – **läuft seit Session 5 (07.07.2026) in Docker** (Container `parley-postgres-1`/`parley-redis-1`/`parley-minio-1`); DB-Zugriff z. B. `docker exec -i parley-postgres-1 psql -U parley -d parley`. Fallback ohne Docker: `scripts\dev-infra.ps1` (die portablen Binaries unter `%LOCALAPPDATA%\Programs\parley-infra` existieren dort nicht mehr unbedingt – vor Nutzung prüfen)
-- Testnutzer in der Dev-DB (frisch angelegt in Session 3): `arian.test@example.com` und `frieda.test@example.com`, Passwort jeweils `test-passwort-123`
+- Infrastruktur: **Docker Desktop war in Session 6 (07.07.2026) nicht mehr installiert** – es läuft wieder die portable Infra (`%LOCALAPPDATA%\Programs\parley-infra`, alle Binaries vorhanden): PostgreSQL per `pg_ctl -D %LOCALAPPDATA%\parley-data\pgdata -w start`, Redis/MinIO per `Start-Process` (Schritte wie in `scripts\dev-infra.ps1`; der Skript-Aufruf mit `-ExecutionPolicy Bypass` kann vom Berechtigungs-Classifier blockiert werden → Schritte einzeln ausführen). Die PORTABLE DB stand auf Phase-5-Stand; `e2ee`/`friends_dms`/`attachments` wurden per `prisma migrate deploy` nachgezogen. Die Docker-DB (Sessions 5) samt ihrer Testdaten ist damit nicht mehr im Zugriff. Falls Docker wieder da ist: `docker compose -f infra/docker-compose.yml up -d`
+- Testnutzer in der (portablen) Dev-DB: `arian.test@example.com` / `frieda.test@example.com` (Benutzernamen `arian`/`frieda`), Passwort jeweils `test-passwort-123`
 - Session 4 (06.07.2026): Dev-DB stand nur auf der Phase-1-Migration – `servers_channels`, `messages` und `roles` per `prisma migrate deploy` nachgezogen; Server „Arians Treffpunkt“ (Owner `arian_test`) neu angelegt, alte Server/Nachrichten waren weg
 - `core.autocrlf=true` ist global gesetzt – `.gitattributes` pinnt deshalb LF für den Working Tree; nach einem frischen Checkout ggf. einmal `git add --renormalize .` bzw. Prettier laufen lassen

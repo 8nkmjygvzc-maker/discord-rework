@@ -83,9 +83,15 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     if (!threadRootId) return null;
     const loaded = new Set(conversation.map((m) => m.id));
     let root = threadRootId;
+    // `seen` schützt vor Antwort-Zyklen: Mit server-generierten UUIDs können
+    // Zyklen zwar nicht entstehen (eine zukünftige ID ist nicht vorhersagbar),
+    // aber die Terminierung dieser Schleife soll nicht von dieser Invariante
+    // abhängen – replyTo bleibt absenderkontrollierte Eingabe.
+    const seen = new Set([root]);
     for (;;) {
       const parent = decrypted[root]?.replyTo?.messageId;
-      if (!parent || !loaded.has(parent)) break;
+      if (!parent || !loaded.has(parent) || seen.has(parent)) break;
+      seen.add(parent);
       root = parent;
     }
     const ids = new Set<string>();
@@ -170,7 +176,9 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   }
 
   function jumpTo(messageId: string) {
-    const el = scrollRef.current?.querySelector(`[data-message-id="${messageId}"]`);
+    // CSS.escape: Die ID stammt aus dem (absenderkontrollierten) replyTo –
+    // ohne Escaping würde z. B. ein `"]` den Selektor-Parser werfen lassen.
+    const el = scrollRef.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
     if (!el) return; // Original (noch) nicht geladen – bewusst kein Auto-Nachladen in v1
     stickToBottom.current = false;
     el.scrollIntoView({ block: 'center' });
@@ -331,6 +339,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
                 myUsername={user?.username ?? null}
                 knownUsernames={knownUsernames}
                 reactionEvents={reactions[msg.id]}
+                canSend={canSend}
                 hasThread={childrenByParent.has(msg.id) || !!content?.replyTo}
                 flash={flashId === msg.id}
                 onToggleReaction={(emoji, mine) => toggleReaction(msg.id, emoji, mine)}
