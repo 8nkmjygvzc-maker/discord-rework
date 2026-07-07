@@ -1,6 +1,7 @@
 // Datenmodell (wächst phasenweise per Migration):
 // Phase 1: User, RefreshToken – Phase 3: Server, Membership, Channel –
-// Phase 4: Message – Phase 6: Device, KeyEnvelope – Phase 7: Friendship, DmMember
+// Phase 4: Message – Phase 6: Device, KeyEnvelope – Phase 7: Friendship, DmMember –
+// Phase 8: Attachment
 
 generator client {
   provider = "prisma-client-js"
@@ -32,6 +33,7 @@ model User {
   friendshipsFrom Friendship[]   @relation("FriendshipsFrom")
   friendshipsTo   Friendship[]   @relation("FriendshipsTo")
   dmMemberships   DmMember[]
+  attachments     Attachment[]
 }
 
 // Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –
@@ -178,8 +180,9 @@ model Channel {
   dmKey     String?     @unique
   createdAt DateTime    @default(now())
 
-  messages  Message[]
-  dmMembers DmMember[]
+  messages    Message[]
+  dmMembers   DmMember[]
+  attachments Attachment[]
 
   @@index([serverId])
 }
@@ -199,8 +202,33 @@ model Message {
   createdAt  DateTime  @default(now())
   editedAt   DateTime?
 
+  attachments Attachment[]
+
   // History-Abfragen laden „die letzten N vor Zeitpunkt X eines Kanals“.
   @@index([channelId, createdAt])
+}
+
+// Phase 8: Verschlüsselte Anhänge. Der Server speichert nur den Ciphertext-Blob
+// in MinIO (objectKey) und die Blob-Größe. Dateischlüssel, Dateiname und
+// MIME-Typ stehen IM E2EE-verschlüsselten Nachrichtentext – bewusste Abweichung
+// vom Ausgangsmodell in CLAUDE.md §5 (dort mimeType/encryptedFileUrl als
+// Server-Spalten), damit der Server auch diese Metadaten nicht sieht.
+model Attachment {
+  id         String   @id @default(uuid())
+  channelId  String
+  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  uploaderId String
+  uploader   User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  // null zwischen Upload und Senden der Nachricht; wird beim Senden gesetzt.
+  messageId  String?
+  message    Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  // Objektname im MinIO-Bucket (der Blob selbst liegt nie in der DB).
+  objectKey  String   @unique
+  sizeBytes  Int
+  createdAt  DateTime @default(now())
+
+  @@index([messageId])
+  @@index([channelId])
 }
 
 // Refresh-Tokens werden nur als SHA-256-Hash gespeichert: Ein DB-Leak allein

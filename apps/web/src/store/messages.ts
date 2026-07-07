@@ -1,9 +1,17 @@
 import { create } from 'zustand';
-import type { MessageHistoryResponse, MessageInfo } from '@parley/shared';
+import {
+  AttachmentMeta,
+  decodeMessageContent,
+  DecodedMessageContent,
+  encodeMessageContent,
+  MessageHistoryResponse,
+  MessageInfo,
+} from '@parley/shared';
 import { useAuthStore } from './auth';
 import { useServersStore } from './servers';
 import { dmMemberIds } from './dms';
 import { e2ee } from '../lib/e2ee';
+import { collectAttachmentIds, uploadAttachment } from '../lib/attachments';
 
 interface ChannelMessages {
   messages: MessageInfo[];
@@ -13,18 +21,19 @@ interface ChannelMessages {
 
 /**
  * Nachrichten pro Kanal. Seit Phase 6 kommen sie als Ciphertext an –
- * `decrypted` hält die entschlüsselten Texte NUR IM SPEICHER (nie
- * persistiert). Fehlt der Sender-Key noch, bleibt der Eintrag aus und die
+ * `decrypted` hält die entschlüsselten Inhalte NUR IM SPEICHER (nie
+ * persistiert); seit Phase 8 strukturiert (Text + Anhangs-Metadaten inkl.
+ * Dateischlüssel). Fehlt der Sender-Key noch, bleibt der Eintrag aus und die
  * UI zeigt einen Platzhalter; nach jedem Schlüssel-Umschlag wird erneut
  * versucht (retryUndecrypted).
  */
 interface MessagesState {
   byChannel: Record<string, ChannelMessages>;
-  decrypted: Record<string, string>;
+  decrypted: Record<string, DecodedMessageContent>;
 
   loadHistory: (channelId: string) => Promise<void>;
   loadOlder: (channelId: string) => Promise<void>;
-  sendMessage: (channelId: string, content: string) => Promise<void>;
+  sendMessage: (channelId: string, content: string, files?: File[]) => Promise<void>;
 
   handleMessageCreate: (message: MessageInfo) => void;
   retryUndecrypted: () => void;
@@ -84,7 +93,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     void decryptBatch(res.messages, set, get);
   },
 
-  sendMessage: async (channelId, content) => {
+  sendMessage: async (channelId, content, files = []) => {
     // Kontext bestimmen: Kanal des ausgewählten Servers oder eigener DM-Kanal.
     const server = useServersStore.getState().selectedServer;
     let serverId: string | null = null;
@@ -97,14 +106,24 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
       if (!dm) throw new Error('Kanal nicht gefunden');
       memberIds = dm;
     }
+
+    // Anhänge zuerst: verschlüsseln + hochladen; die Metadaten (inkl.
+    // Dateischlüssel) reisen gleich im E2EE-Klartext mit.
+    const attachments: AttachmentMeta[] = [];
+    for (const file of files) attachments.push(await uploadAttachment(channelId, file));
+
     // Verschlüsseln (verteilt bei Bedarf vorher den eigenen Sender-Key).
-    const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, content);
+    const plaintext = encodeMessageContent(content, attachments);
+    const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
+    const attachmentIds = collectAttachmentIds(attachments);
     const message = await authFetch<MessageInfo>(`/api/channels/${channelId}/messages`, {
       method: 'POST',
-      body: payload,
+      body: { ...payload, ...(attachmentIds.length > 0 ? { attachmentIds } : {}) },
     });
     // Eigenen Klartext direkt eintragen – kein Entschlüsselungs-Umweg nötig.
-    set((s) => ({ decrypted: { ...s.decrypted, [message.id]: content } }));
+    set((s) => ({
+      decrypted: { ...s.decrypted, [message.id]: { text: content, attachments } },
+    }));
     get().handleMessageCreate(message);
   },
 
@@ -133,11 +152,11 @@ type Get = () => MessagesState;
 
 /** Entschlüsselt fehlende Nachrichten und trägt Ergebnisse gesammelt ein. */
 async function decryptBatch(messages: MessageInfo[], set: Set, get: Get): Promise<void> {
-  const results: Record<string, string> = {};
+  const results: Record<string, DecodedMessageContent> = {};
   for (const message of messages) {
     if (get().decrypted[message.id] !== undefined) continue;
     const plaintext = await e2ee.decryptMessage(message);
-    if (plaintext !== null) results[message.id] = plaintext;
+    if (plaintext !== null) results[message.id] = decodeMessageContent(plaintext);
   }
   if (Object.keys(results).length > 0) {
     set((s) => ({ decrypted: { ...s.decrypted, ...results } }));

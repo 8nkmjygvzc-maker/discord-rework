@@ -12,6 +12,8 @@ import { RolesModule } from './roles/roles.module';
 import { KeysModule } from './keys/keys.module';
 import { FriendsModule } from './friends/friends.module';
 import { DmsModule } from './dms/dms.module';
+import { StorageModule } from './storage/storage.module';
+import { AttachmentsModule } from './attachments/attachments.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { DmsModule } from './dms/dms.module';
     KeysModule,
     FriendsModule,
     DmsModule,
+    StorageModule,
+    AttachmentsModule,
   ],
 })
 export class AppModule {}

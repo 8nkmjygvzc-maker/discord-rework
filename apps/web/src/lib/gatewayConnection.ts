@@ -9,6 +9,7 @@ import type {
 } from '@parley/shared';
 import { GatewayClient } from './gateway';
 import { e2ee } from './e2ee';
+import { resetAttachmentCache } from './attachments';
 import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { useServersStore } from '../store/servers';
@@ -98,6 +99,7 @@ export const gateway = {
   disconnect: (): void => {
     client.stop();
     e2ee.reset();
+    resetAttachmentCache();
     usePresenceStore.getState().handleDisconnected();
     useServersStore.getState().reset();
     useMessagesStore.getState().reset();

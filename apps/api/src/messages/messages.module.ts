@@ -5,10 +5,13 @@ import { RolesModule } from '../roles/roles.module';
 import { FriendsModule } from '../friends/friends.module';
 import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
+import { ChannelAccessService } from './channel-access.service';
 
 @Module({
   imports: [AuthModule, GatewayModule, RolesModule, FriendsModule],
   controllers: [MessagesController],
-  providers: [MessagesService],
+  providers: [MessagesService, ChannelAccessService],
+  // ChannelAccessService wird auch von den Anhängen (Phase 8) genutzt.
+  exports: [ChannelAccessService],
 })
 export class MessagesModule {}

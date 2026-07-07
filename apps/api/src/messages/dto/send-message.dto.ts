@@ -1,5 +1,18 @@
 import { Type } from 'class-transformer';
-import { Equals, IsInt, IsObject, IsString, Length, Min, ValidateNested } from 'class-validator';
+import {
+  ArrayMaxSize,
+  Equals,
+  IsArray,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '@parley/shared';
 
 /** Klartext-Header der E2EE-Nachricht (EncryptedMessageHeader aus @parley/shared). */
 export class MessageHeaderDto {
@@ -37,4 +50,11 @@ export class SendMessageDto {
   @ValidateNested()
   @Type(() => MessageHeaderDto)
   header!: MessageHeaderDto;
+
+  /** IDs zuvor hochgeladener Anhänge (Phase 8) – werden beim Senden gebunden. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ATTACHMENTS_PER_MESSAGE)
+  @IsUUID('4', { each: true })
+  attachmentIds?: string[];
 }

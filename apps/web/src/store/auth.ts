@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { AuthResponse, AuthUser, UpdateProfileRequest } from '@parley/shared';
-import { apiFetch, ApiError } from '../lib/api';
+import { apiDownload, apiFetch, apiUpload, ApiError } from '../lib/api';
 
 /**
  * Auth-Store: Der Access-Token lebt bewusst NUR im Speicher (kein
@@ -29,6 +29,10 @@ interface AuthState {
     path: string,
     options?: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown },
   ) => Promise<T>;
+  /** Roh-Upload (verschlüsselter Anhang) mit derselben 401-Retry-Logik. */
+  authUpload: <T>(path: string, body: Uint8Array) => Promise<T>;
+  /** Binär-Download (Ciphertext-Blob) mit derselben 401-Retry-Logik. */
+  authDownload: (path: string) => Promise<Uint8Array>;
 }
 
 /**
@@ -108,21 +112,33 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     }
   },
 
-  authFetch: async <T>(
+  authFetch: <T>(
     path: string,
     options: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown } = {},
-  ): Promise<T> => {
-    try {
-      return await apiFetch<T>(path, { ...options, accessToken: get().accessToken });
-    } catch (e) {
-      if (!(e instanceof ApiError) || e.status !== 401) throw e;
-      // Access-Token abgelaufen → einmal per Refresh-Cookie erneuern.
-      const res = await refreshSession().catch(() => {
-        set({ user: null, accessToken: null });
-        throw e;
-      });
-      set({ user: res.user, accessToken: res.accessToken });
-      return apiFetch<T>(path, { ...options, accessToken: res.accessToken });
-    }
-  },
+  ): Promise<T> => withAuthRetry((token) => apiFetch<T>(path, { ...options, accessToken: token })),
+
+  authUpload: <T>(path: string, body: Uint8Array): Promise<T> =>
+    withAuthRetry((token) => apiUpload<T>(path, body, token)),
+
+  authDownload: (path: string): Promise<Uint8Array> =>
+    withAuthRetry((token) => apiDownload(path, token)),
 }));
+
+/**
+ * Führt einen authentifizierten Request aus; bei 401 wird der Access-Token
+ * einmalig über das Refresh-Cookie erneuert und der Request wiederholt.
+ */
+async function withAuthRetry<T>(run: (accessToken: string | null) => Promise<T>): Promise<T> {
+  const { getState, setState } = useAuthStore;
+  try {
+    return await run(getState().accessToken);
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 401) throw e;
+    const res = await refreshSession().catch(() => {
+      setState({ user: null, accessToken: null });
+      throw e;
+    });
+    setState({ user: res.user, accessToken: res.accessToken });
+    return run(res.accessToken);
+  }
+}
