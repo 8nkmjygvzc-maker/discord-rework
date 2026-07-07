@@ -4,19 +4,30 @@ import {
   decodeMessageContent,
   DecodedMessageContent,
   encodeMessageContent,
+  encodeReactionContent,
   MessageHistoryResponse,
   MessageInfo,
+  ReplyRef,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
 import { useServersStore } from './servers';
-import { dmMemberIds } from './dms';
+import { dmMemberIds, useDmsStore } from './dms';
 import { e2ee } from '../lib/e2ee';
 import { collectAttachmentIds, uploadAttachment } from '../lib/attachments';
+import { mentionsUser } from '../lib/mentions';
+import { notifyMention } from '../lib/notifications';
 
 interface ChannelMessages {
   messages: MessageInfo[];
   hasMore: boolean;
   loaded: boolean;
+}
+
+/** Letzter bekannter Reaktions-Stand eines Nutzers für ein Emoji auf ein Ziel. */
+export interface ReactionEventState {
+  action: 'add' | 'remove';
+  createdAt: string;
+  username: string;
 }
 
 /**
@@ -26,14 +37,33 @@ interface ChannelMessages {
  * Dateischlüssel). Fehlt der Sender-Key noch, bleibt der Eintrag aus und die
  * UI zeigt einen Platzhalter; nach jedem Schlüssel-Umschlag wird erneut
  * versucht (retryUndecrypted).
+ *
+ * Phase 9: Reaktionen sind verschlüsselte Spezial-Nachrichten in derselben
+ * Pipeline. Nach dem Entschlüsseln landen sie NICHT in der sichtbaren Liste,
+ * sondern werden in `reactions` gefaltet: pro Ziel-Nachricht und
+ * (Nutzer, Emoji) gewinnt das Event mit dem jüngsten Zeitstempel
+ * (add/remove-Toggle). Aggregation (Zähler, „von mir“) macht die UI.
  */
 interface MessagesState {
   byChannel: Record<string, ChannelMessages>;
   decrypted: Record<string, DecodedMessageContent>;
+  /** targetMessageId → `${userId}|${emoji}` → letzter Stand. */
+  reactions: Record<string, Record<string, ReactionEventState>>;
 
   loadHistory: (channelId: string) => Promise<void>;
   loadOlder: (channelId: string) => Promise<void>;
-  sendMessage: (channelId: string, content: string, files?: File[]) => Promise<void>;
+  sendMessage: (
+    channelId: string,
+    content: string,
+    files?: File[],
+    replyTo?: ReplyRef,
+  ) => Promise<void>;
+  sendReaction: (
+    channelId: string,
+    targetMessageId: string,
+    emoji: string,
+    action: 'add' | 'remove',
+  ) => Promise<void>;
 
   handleMessageCreate: (message: MessageInfo) => void;
   retryUndecrypted: () => void;
@@ -55,9 +85,27 @@ function appendMessage(state: ChannelMessages, message: MessageInfo): ChannelMes
   return { ...state, messages: [...state.messages, message] };
 }
 
+/**
+ * Sende-Kontext eines Kanals: Server-Kanal des ausgewählten Servers oder
+ * eigener DM-Kanal (serverId bleibt dann null).
+ */
+function resolveChannelContext(channelId: string): {
+  serverId: string | null;
+  memberIds: string[];
+} {
+  const server = useServersStore.getState().selectedServer;
+  if (server?.channels.some((c) => c.id === channelId)) {
+    return { serverId: server.id, memberIds: server.members.map((m) => m.userId) };
+  }
+  const dm = dmMemberIds(channelId);
+  if (!dm) throw new Error('Kanal nicht gefunden');
+  return { serverId: null, memberIds: dm };
+}
+
 export const useMessagesStore = create<MessagesState>()((set, get) => ({
   byChannel: {},
   decrypted: {},
+  reactions: {},
 
   loadHistory: async (channelId) => {
     if (get().byChannel[channelId]?.loaded) return;
@@ -68,7 +116,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
         [channelId]: { messages: res.messages, hasMore: res.hasMore, loaded: true },
       },
     }));
-    void decryptBatch(res.messages, set, get);
+    void decryptBatch(res.messages, set, get, false);
   },
 
   loadOlder: async (channelId) => {
@@ -90,22 +138,11 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
         },
       };
     });
-    void decryptBatch(res.messages, set, get);
+    void decryptBatch(res.messages, set, get, false);
   },
 
-  sendMessage: async (channelId, content, files = []) => {
-    // Kontext bestimmen: Kanal des ausgewählten Servers oder eigener DM-Kanal.
-    const server = useServersStore.getState().selectedServer;
-    let serverId: string | null = null;
-    let memberIds: string[];
-    if (server?.channels.some((c) => c.id === channelId)) {
-      serverId = server.id;
-      memberIds = server.members.map((m) => m.userId);
-    } else {
-      const dm = dmMemberIds(channelId);
-      if (!dm) throw new Error('Kanal nicht gefunden');
-      memberIds = dm;
-    }
+  sendMessage: async (channelId, content, files = [], replyTo) => {
+    const { serverId, memberIds } = resolveChannelContext(channelId);
 
     // Anhänge zuerst: verschlüsseln + hochladen; die Metadaten (inkl.
     // Dateischlüssel) reisen gleich im E2EE-Klartext mit.
@@ -113,7 +150,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     for (const file of files) attachments.push(await uploadAttachment(channelId, file));
 
     // Verschlüsseln (verteilt bei Bedarf vorher den eigenen Sender-Key).
-    const plaintext = encodeMessageContent(content, attachments);
+    const plaintext = encodeMessageContent(content, attachments, replyTo);
     const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
     const attachmentIds = collectAttachmentIds(attachments);
     const message = await authFetch<MessageInfo>(`/api/channels/${channelId}/messages`, {
@@ -122,7 +159,27 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     });
     // Eigenen Klartext direkt eintragen – kein Entschlüsselungs-Umweg nötig.
     set((s) => ({
-      decrypted: { ...s.decrypted, [message.id]: { text: content, attachments } },
+      decrypted: {
+        ...s.decrypted,
+        [message.id]: { text: content, attachments, replyTo: replyTo ?? null, reaction: null },
+      },
+    }));
+    get().handleMessageCreate(message);
+  },
+
+  sendReaction: async (channelId, targetMessageId, emoji, action) => {
+    const { serverId, memberIds } = resolveChannelContext(channelId);
+    const plaintext = encodeReactionContent(targetMessageId, emoji, action);
+    const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
+    const message = await authFetch<MessageInfo>(`/api/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: payload,
+    });
+    // Eigenes Event direkt eintragen (kein Entschlüsselungs-Umweg).
+    const content = decodeMessageContent(plaintext);
+    set((s) => ({
+      decrypted: { ...s.decrypted, [message.id]: content },
+      reactions: foldReactions(s.reactions, [{ message, content }]),
     }));
     get().handleMessageCreate(message);
   },
@@ -134,31 +191,91 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
       if (!chan?.loaded) return {};
       return { byChannel: { ...s.byChannel, [message.channelId]: appendMessage(chan, message) } };
     });
-    void decryptBatch([message], set, get);
+    void decryptBatch([message], set, get, true);
   },
 
   /** Nach neuen Sender-Keys: alles noch Unentschlüsselte erneut versuchen. */
   retryUndecrypted: () => {
     const { byChannel } = get();
     const pending = Object.values(byChannel).flatMap((chan) => chan.messages);
-    void decryptBatch(pending, set, get);
+    void decryptBatch(pending, set, get, false);
   },
 
-  reset: () => set({ byChannel: {}, decrypted: {} }),
+  reset: () => set({ byChannel: {}, decrypted: {}, reactions: {} }),
 }));
 
 type Set = (fn: (s: MessagesState) => Partial<MessagesState>) => void;
 type Get = () => MessagesState;
 
-/** Entschlüsselt fehlende Nachrichten und trägt Ergebnisse gesammelt ein. */
-async function decryptBatch(messages: MessageInfo[], set: Set, get: Get): Promise<void> {
-  const results: Record<string, DecodedMessageContent> = {};
+/**
+ * Entschlüsselt fehlende Nachrichten und trägt Ergebnisse gesammelt ein.
+ * `live` = frisch über das Gateway angekommen (nicht History): nur dann wird
+ * auf @Erwähnungen geprüft und ggf. eine Browser-Benachrichtigung gezeigt.
+ */
+async function decryptBatch(
+  messages: MessageInfo[],
+  set: Set,
+  get: Get,
+  live: boolean,
+): Promise<void> {
+  const results: { message: MessageInfo; content: DecodedMessageContent }[] = [];
   for (const message of messages) {
     if (get().decrypted[message.id] !== undefined) continue;
     const plaintext = await e2ee.decryptMessage(message);
-    if (plaintext !== null) results[message.id] = decodeMessageContent(plaintext);
+    if (plaintext !== null) results.push({ message, content: decodeMessageContent(plaintext) });
   }
-  if (Object.keys(results).length > 0) {
-    set((s) => ({ decrypted: { ...s.decrypted, ...results } }));
+  if (results.length === 0) return;
+
+  set((s) => ({
+    decrypted: {
+      ...s.decrypted,
+      ...Object.fromEntries(results.map((r) => [r.message.id, r.content])),
+    },
+    reactions: foldReactions(s.reactions, results),
+  }));
+
+  if (live) {
+    const me = useAuthStore.getState().user;
+    for (const { message, content } of results) {
+      if (!me || message.senderId === me.id || content.reaction) continue;
+      if (mentionsUser(content.text, me.username)) {
+        notifyMention(message.senderUsername, channelLabel(message.channelId), content.text);
+      }
+    }
   }
+}
+
+/** Reaktions-Events einfalten: pro (Ziel, Nutzer, Emoji) gewinnt das jüngste. */
+function foldReactions(
+  reactions: MessagesState['reactions'],
+  results: { message: MessageInfo; content: DecodedMessageContent }[],
+): MessagesState['reactions'] {
+  let changed = false;
+  const next = { ...reactions };
+  for (const { message, content } of results) {
+    const reaction = content.reaction;
+    if (!reaction) continue;
+    const byUserEmoji = { ...(next[reaction.targetMessageId] ?? {}) };
+    const key = `${message.senderId}|${reaction.emoji}`;
+    const existing = byUserEmoji[key];
+    if (existing && existing.createdAt >= message.createdAt) continue;
+    byUserEmoji[key] = {
+      action: reaction.action,
+      createdAt: message.createdAt,
+      username: message.senderUsername,
+    };
+    next[reaction.targetMessageId] = byUserEmoji;
+    changed = true;
+  }
+  return changed ? next : reactions;
+}
+
+/** Anzeigename des Kanals für Benachrichtigungen („#kanal“ bzw. „@nutzer“). */
+function channelLabel(channelId: string): string {
+  const server = useServersStore.getState().selectedServer;
+  const channel = server?.channels.find((c) => c.id === channelId);
+  if (channel) return `#${channel.name}`;
+  const dm = useDmsStore.getState().channels.find((c) => c.id === channelId);
+  if (dm) return `@${dm.otherUser.username}`;
+  return 'einem Kanal';
 }

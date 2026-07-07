@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { cryptoReady } from './sodium';
 import { decryptFileBytes, encryptFileBytes } from './file';
-import { decodeMessageContent, encodeMessageContent } from '../messages';
 
 beforeAll(() => cryptoReady());
 
@@ -30,31 +29,4 @@ describe('Datei-Verschlüsselung (Phase 8)', () => {
   });
 });
 
-describe('Nachrichten-Inhaltsformat (Phase 8)', () => {
-  it('kodiert und dekodiert Text mit Anhängen', () => {
-    const meta = {
-      id: 'a1',
-      name: 'foto.png',
-      mimeType: 'image/png',
-      sizeBytes: 123,
-      key: 'k',
-      nonce: 'n',
-    };
-    const decoded = decodeMessageContent(encodeMessageContent('hallo', [meta]));
-    expect(decoded.text).toBe('hallo');
-    expect(decoded.attachments).toEqual([meta]);
-  });
-
-  it('behandelt Nachrichten aus Phase 6/7 (Rohtext) als Text ohne Anhänge', () => {
-    expect(decodeMessageContent('einfach nur Text')).toEqual({
-      text: 'einfach nur Text',
-      attachments: [],
-    });
-    // Auch krumme JSON-ähnliche Texte fallen sauber auf Rohtext zurück.
-    expect(decodeMessageContent('{kein json')).toEqual({ text: '{kein json', attachments: [] });
-    expect(decodeMessageContent('{"v":2,"x":1}')).toEqual({
-      text: '{"v":2,"x":1}',
-      attachments: [],
-    });
-  });
-});
+// Tests zum Nachrichten-Inhaltsformat liegen seit Phase 9 in src/messages.spec.ts.
