@@ -56,9 +56,7 @@ export class FriendsService {
 
     return {
       friends: rows.filter((r) => r.status === 'ACCEPTED').map((r) => toPublicUser(other(r))),
-      incoming: rows
-        .filter((r) => r.status === 'PENDING' && r.friendId === userId)
-        .map(toRequest),
+      incoming: rows.filter((r) => r.status === 'PENDING' && r.friendId === userId).map(toRequest),
       outgoing: rows.filter((r) => r.status === 'PENDING' && r.userId === userId).map(toRequest),
       // Nur MEINE Blockierungen – wer mich blockiert, bleibt unsichtbar.
       blocked: rows
@@ -113,7 +111,14 @@ export class FriendsService {
     if (!row || row.status !== 'PENDING') {
       throw new NotFoundException('Keine offene Anfrage von diesem Nutzer');
     }
-    await this.prisma.friendship.update({ where: { id: row.id }, data: { status: 'ACCEPTED' } });
+    await this.prisma.$transaction([
+      this.prisma.friendship.update({ where: { id: row.id }, data: { status: 'ACCEPTED' } }),
+      // Haben beide gleichzeitig angefragt (Race in addByUsername), existiert
+      // auch eine Gegen-Anfrage von mir – die wäre sonst für immer PENDING.
+      this.prisma.friendship.deleteMany({
+        where: { userId, friendId: requesterId, status: 'PENDING' },
+      }),
+    ]);
     await this.notifyBoth(userId, requesterId);
     // Frisch befreundet → beide dürfen jetzt den Online-Status des anderen sehen.
     await this.pushPresenceToEachOther(userId, requesterId);
@@ -138,7 +143,8 @@ export class FriendsService {
 
   /** Blockieren ersetzt jede bestehende Beziehung (Anfrage/Freundschaft). */
   async block(userId: string, targetId: string): Promise<void> {
-    if (targetId === userId) throw new BadRequestException('Du kannst dich nicht selbst blockieren');
+    if (targetId === userId)
+      throw new BadRequestException('Du kannst dich nicht selbst blockieren');
     const target = await this.prisma.user.findUnique({
       where: { id: targetId },
       select: { id: true },
@@ -231,7 +237,9 @@ export class FriendsService {
     const online = await this.presence.getOnlineUsers();
     const userA = online.find((u) => u.id === a);
     const userB = online.find((u) => u.id === b);
-    if (userA) await this.gateway.publishDispatch('PRESENCE_UPDATE', { user: userA, online: true }, [b]);
-    if (userB) await this.gateway.publishDispatch('PRESENCE_UPDATE', { user: userB, online: true }, [a]);
+    if (userA)
+      await this.gateway.publishDispatch('PRESENCE_UPDATE', { user: userA, online: true }, [b]);
+    if (userB)
+      await this.gateway.publishDispatch('PRESENCE_UPDATE', { user: userB, online: true }, [a]);
   }
 }

@@ -73,7 +73,13 @@ export class KeysService implements OnModuleInit {
   }
 
   /** Öffentliches Schlüsselbündel eines Nutzers (für X3DH). */
-  async getBundle(userId: string): Promise<DeviceKeyBundle> {
+  async getBundle(requesterId: string, userId: string): Promise<DeviceKeyBundle> {
+    // Wie die Umschläge (Phase 7) auf den Sichtbarkeitskreis beschränkt –
+    // sonst ließe sich per UUID durchprobieren, welche Nutzer existieren.
+    // 404 statt 403, damit auch die Antwort nichts über die Existenz verrät.
+    if (!(await this.visibility.canSee(requesterId, userId))) {
+      throw new NotFoundException('Nutzer hat keine Schlüssel registriert');
+    }
     const device = await this.prisma.device.findUnique({ where: { userId } });
     if (!device) throw new NotFoundException('Nutzer hat keine Schlüssel registriert');
     return {

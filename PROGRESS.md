@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 6 abgeschlossen (06.07.2026)
+## Status: Phase 7 abgeschlossen (07.07.2026)
 
 ## Erledigt
 
@@ -89,9 +89,24 @@ Wie Phase 5 kam die Implementierung als angelieferter Commit (`3a38c88`); diese 
 
 **Verifiziert:** Skript mit 33 Checks, alle grün – u. a.: DB enthält nur Ciphertext (`content`-Spalte weg, kein Klartext, keine privaten Schlüssel, Chain-Keys in Umschlägen nur verschlüsselt); X3DH+Ratchet-Umschlag offline (Mailbox) und live (Gateway); Vorspulen/Out-of-Order; **Beitritts-Semantik** (Nachrichten vor dem Beitritt bleiben unlesbar); **Rotation nach Austritt** (Ausgetretener: kein Event, History 404, alte Schlüssel passen nicht); Schlüssel-Reset verwirft Mailbox; Validierung (ungültige Prekey-Signatur 400, Umschlag >16 KiB 400, ohne Header 400). Interop-Test Web-Client ↔ Skript-Client: UI-Nachricht wird nach friedas Schlüssel-Reset automatisch neu verteilt und entschlüsselt, friedas verschlüsselte Antwort erscheint lesbar in der UI, übersteht Reload (IndexedDB); alte, fremdverschlüsselte Nachrichten zeigen den 🔒-Platzhalter. Build/Tests (21)/Lint/Format grün.
 
+### Phase 7 – Direktnachrichten & Freunde (07.07.2026)
+
+Wie Phase 5/6 kam die Implementierung als angelieferter Commit (`8cd249e`); diese Session hat reviewt, drei Lücken geschlossen und die Phase verifiziert.
+
+- **Prisma:** `Friendship` (eine Zeile pro Richtung, `userId` = Initiator des aktuellen Zustands: PENDING/ACCEPTED/BLOCKED; gegenseitige Blocks möglich), `DmMember` (n:m, v1 = genau zwei), `Channel.dmKey` (kanonischer Paar-Schlüssel „kleinereId:größereId“ mit Unique-Index – verhindert doppelte DM-Kanäle beim gleichzeitigen Öffnen, Race wird per P2002-Catch aufgelöst); Migration `friends_dms`
+- **Freunde-REST** (`apps/api/src/friends/`): Anfrage per Benutzername (Gegen-Anfrage wird direkt angenommen), annehmen, ablehnen/zurückziehen/entfreunden (ein DELETE), blockieren/entblocken. Kein Leak: Wer mich blockiert, taucht bei mir nirgends auf; Anfrage bei Blockierung in irgendeiner Richtung → generisches 400. Jede Änderung löst `FRIENDS_UPDATE` an beide aus (Clients laden die Liste neu)
+- **DM-REST** (`apps/api/src/dms/`): `GET/POST /api/dms`; Policy: DMs zwischen Freunden ODER Mitgliedern gemeinsamer Server, Blockierung sperrt Öffnen und SENDEN in beide Richtungen (History bleibt lesbar, wie Discord). `MessagesService` behandelt DM-Kanäle (nur die zwei Teilnehmer, 404 für Außenstehende) neben Server-Kanälen
+- **DM-E2EE:** DMs nutzen denselben Sender-Key-Ratchet wie Kanäle (verteilt über die X3DH+Double-Ratchet-Sessions aus Phase 6) – **bewusste Abweichung** von CLAUDE.md §6 (reines Double Ratchet), weil History ohne lokalen Klartext-Speicher nach Reload neu entschlüsselbar sein muss; Trade-off in ROADMAP.md dokumentiert
+- **Presence gescoped:** READY-Snapshot und `PRESENCE_UPDATE` gehen nur noch an den Sichtbarkeitskreis (`VisibilityService`: Freunde + gemeinsame Server + DM-Partner); `PRESENCE_SYNC` liefert additiv nach, wenn der Kreis wächst (Server-Beitritt); neue Freundschaft pusht den Online-Status an beide
+- **Sichtbarkeits-Härtung:** `POST /api/envelopes` (403) und – Review-Fix dieser Session – `GET /users/:id/keys` (404, kein Existenz-Leak per UUID-Raten) verlangen den Sichtbarkeitskreis
+- **Frontend:** Home-Ansicht (Zuhause-Button mit Anfragen-Badge → DM-Liste mit Online-Punkten + Freunde-Panel mit Tabs Freunde/Anfragen/Blockiert), `ChatView` im DM-Modus (@ statt #, kein Rechte-Gate), Stores `friends`/`dms`, neue Gateway-Events verdrahtet
+- **Review-Fixes dieser Session:** (1) `accept()` räumt die Gegen-Anfrage mit ab, falls sich beide gleichzeitig angefragt haben (sonst bliebe eine PENDING-Zeile für immer liegen); (2) Schlüsselbündel-Abruf auf Sichtbarkeitskreis beschränkt (s. o.); (3) Lint-Fehler (ungenutztes `get` im DMs-Store)
+
+**Verifiziert:** Skript mit 41 Checks, alle grün – u. a.: kompletter Anfrage-Lebenszyklus inkl. Gegen-Anfrage-Auto-Accept; Presence-Scoping (Fremde sehen sich weder im READY-Snapshot noch per PRESENCE_UPDATE; neue Freundschaft/Server-Beitritt liefern nach); DM-Policy (Freunde ✓, gemeinsamer Server ✓, Fremde 403, selbst 400, kanonische Kanal-ID von beiden Seiten); E2EE-Roundtrip in beide Richtungen; Blockieren (Senden 403 beidseitig, History lesbar, DM-Öffnen 403, generische 400er, kein Leak zur Gegenseite, Entblocken stellt Senden wieder her); Bundle/Umschlag-Sichtbarkeit. DB-Check: nur Ciphertext, DM-Kanal ohne Server mit dmKey. Interop-Test UI ↔ Skript: Anfrage-Badge live, Annehmen in der UI, verschlüsselte DMs in beide Richtungen lesbar, übersteht Reload (IndexedDB), Konsole sauber. Build/Tests (21)/Lint/Format grün.
+
 ## Nächste Phase
 
-**Phase 7 – Direktnachrichten & Freunde:** 1:1-Chats unabhängig von Servern (Channel-Typ DM existiert schon, `serverId` nullable), Freundschaftsanfragen/-status (`Friendship`-Modell aus CLAUDE.md Abschnitt 5). Die 1:1-Ratchet-Sessions aus Phase 6 werden dabei direkt zum Nachrichtenkanal; Presence-Routing auf Sichtbarkeit umstellen (siehe ROADMAP) und `POST /api/envelopes` auf Freunde/gemeinsame Server einschränken.
+**Phase 8 – Datei-/Bild-Uploads:** Verschlüsselte Anhänge über MinIO (Client verschlüsselt die Datei, lädt Ciphertext hoch; `Attachment`-Modell aus CLAUDE.md Abschnitt 5), Vorschaubilder. MinIO läuft bereits in der Dev-Infra, wird aber erstmals wirklich genutzt (Bucket-Setup, presigned URLs o. Ä. zu entscheiden).
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 
@@ -109,7 +124,7 @@ Diese Maschine war frisch aufgesetzt (kein Node, kein Docker, WSL defekt). Docke
 - Projektname „Parley“ ist nur Arbeitstitel (siehe ROADMAP.md)
 - Node ist NICHT systemweit installiert – falls `node` im PATH fehlt: `%LOCALAPPDATA%\Programs\nodejs`
 - Server starten: Preview-Panel-Konfigurationen `api`/`web` (`.claude/launch.json`, nutzen `scripts/dev-*.cmd`) oder `npm run dev:api` / `npm run dev:web`
-- Infrastruktur: `scripts\dev-infra.ps1` (portabel) oder `docker compose -f infra/docker-compose.yml up -d` (falls Docker vorhanden)
+- Infrastruktur: `docker compose -f infra/docker-compose.yml up -d` – **läuft seit Session 5 (07.07.2026) in Docker** (Container `parley-postgres-1`/`parley-redis-1`/`parley-minio-1`); DB-Zugriff z. B. `docker exec -i parley-postgres-1 psql -U parley -d parley`. Fallback ohne Docker: `scripts\dev-infra.ps1` (die portablen Binaries unter `%LOCALAPPDATA%\Programs\parley-infra` existieren dort nicht mehr unbedingt – vor Nutzung prüfen)
 - Testnutzer in der Dev-DB (frisch angelegt in Session 3): `arian.test@example.com` und `frieda.test@example.com`, Passwort jeweils `test-passwort-123`
 - Session 4 (06.07.2026): Dev-DB stand nur auf der Phase-1-Migration – `servers_channels`, `messages` und `roles` per `prisma migrate deploy` nachgezogen; Server „Arians Treffpunkt“ (Owner `arian_test`) neu angelegt, alte Server/Nachrichten waren weg
 - `core.autocrlf=true` ist global gesetzt – `.gitattributes` pinnt deshalb LF für den Working Tree; nach einem frischen Checkout ggf. einmal `git add --renormalize .` bzw. Prettier laufen lassen

@@ -147,7 +147,13 @@ function DialogForm({
   );
 }
 
-function CreateServerDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function CreateServerDialog({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const createServer = useServersStore((s) => s.createServer);
   return (
     <Modal title="Server erstellen" onClose={onClose}>

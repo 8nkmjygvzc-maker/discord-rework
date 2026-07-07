@@ -34,8 +34,11 @@ export class KeysController {
 
   /** Schlüsselbündel eines Nutzers für X3DH (nur öffentliche Schlüssel). */
   @Get('users/:userId/keys')
-  getBundle(@Param('userId', ParseUUIDPipe) userId: string): Promise<DeviceKeyBundle> {
-    return this.keys.getBundle(userId);
+  getBundle(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<DeviceKeyBundle> {
+    return this.keys.getBundle(user.sub, userId);
   }
 
   /** Verschlüsselten Schlüssel-Umschlag zustellen (Sender-Key-Verteilung). */

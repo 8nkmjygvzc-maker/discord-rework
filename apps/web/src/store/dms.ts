@@ -33,7 +33,7 @@ function upsert(channels: DmChannelInfo[], channel: DmChannelInfo): DmChannelInf
   );
 }
 
-export const useDmsStore = create<DmsState>()((set, get) => ({
+export const useDmsStore = create<DmsState>()((set) => ({
   channels: [],
   loaded: false,
   selectedDmId: null,

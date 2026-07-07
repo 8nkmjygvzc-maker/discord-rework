@@ -80,7 +80,11 @@ export default function HomeView({ onOpenProfile }: HomeViewProps) {
         <UserFooter onOpenProfile={onOpenProfile} />
       </aside>
 
-      {selected ? <ChatView channel={toDmChannelInfo(selected.id, selected.otherUser.username)} dm /> : <FriendsPanel />}
+      {selected ? (
+        <ChatView channel={toDmChannelInfo(selected.id, selected.otherUser.username)} dm />
+      ) : (
+        <FriendsPanel />
+      )}
     </>
   );
 }
