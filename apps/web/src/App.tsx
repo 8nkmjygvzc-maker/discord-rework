@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from './store/auth';
 import { gateway } from './lib/gatewayConnection';
+import { resyncPush } from './lib/push';
 import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 import MainPage from './pages/MainPage';
@@ -21,6 +22,8 @@ export default function App() {
   useEffect(() => {
     if (!userId) return;
     gateway.connect();
+    // Push-Subscription (falls vorhanden) beim Server neu registrieren.
+    void resyncPush();
     return gateway.disconnect;
   }, [userId]);
 

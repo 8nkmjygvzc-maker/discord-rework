@@ -207,6 +207,23 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
       await sendMessage(channel.id, content, files, replyTo ?? undefined);
       setFiles([]);
       setReplyTo(null);
+      // Erwähnungs-Push (Phase 12): dem Server melden, WEN wir erwähnt haben –
+      // er pusht die offline Erwähnten. Erwähnungen stecken im E2EE-Text, der
+      // Server kann sie nicht selbst erkennen. Nur in Server-Kanälen.
+      if (!dm && members && user && content) {
+        const mentioned = members
+          .filter((m) => m.userId !== user.id && mentionsUser(content, m.username))
+          .map((m) => m.userId);
+        if (mentioned.length > 0) {
+          void useAuthStore
+            .getState()
+            .authFetch<void>(`/api/channels/${channel.id}/notify-mentions`, {
+              method: 'POST',
+              body: { userIds: mentioned },
+            })
+            .catch(() => undefined);
+        }
+      }
     } catch (err) {
       setError(
         err instanceof ApiError || err instanceof Error ? err.message : 'Senden fehlgeschlagen',

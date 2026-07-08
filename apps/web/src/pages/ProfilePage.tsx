@@ -1,7 +1,8 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
+import { disablePush, enablePush, pushStatus, type PushStatus } from '../lib/push';
 
 interface ProfilePageProps {
   /** Zurück zur Hauptansicht (gesetzt, sobald es eine gibt – ab Phase 3). */
@@ -18,6 +19,28 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const [status, setStatus] = useState(user?.status ?? '');
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [pending, setPending] = useState(false);
+  const [push, setPush] = useState<PushStatus | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    void pushStatus().then(setPush);
+  }, []);
+
+  async function togglePush() {
+    setPushBusy(true);
+    try {
+      setPush(push === 'enabled' ? await disablePush() : await enablePush());
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  // Beim Abmelden die Push-Subscription lösen, damit dieses Gerät keine
+  // Benachrichtigungen für den abgemeldeten Account mehr erhält.
+  async function onLogout() {
+    await disablePush().catch(() => undefined);
+    await logout();
+  }
 
   if (!user) return null;
 
@@ -96,6 +119,36 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
           </ul>
         </div>
 
+        {/* Web-Push-Benachrichtigungen (Phase 12) */}
+        <div className="mt-6 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-zinc-300">Benachrichtigungen</h2>
+              <p className="mt-0.5 text-xs text-zinc-500">
+                {push === 'unsupported'
+                  ? 'Von diesem Browser nicht unterstützt.'
+                  : push === 'denied'
+                    ? 'Im Browser blockiert – in den Website-Einstellungen erlauben.'
+                    : push === 'enabled'
+                      ? 'Aktiv – du wirst auch bei geschlossenem Tab benachrichtigt.'
+                      : 'Push für DMs & Erwähnungen, auch bei geschlossenem Tab.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={pushBusy || push === 'unsupported' || push === 'denied' || push === null}
+              onClick={() => void togglePush()}
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                push === 'enabled'
+                  ? 'bg-red-950/60 text-red-300 hover:bg-red-950'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-500'
+              }`}
+            >
+              {pushBusy ? '…' : push === 'enabled' ? 'Deaktivieren' : 'Aktivieren'}
+            </button>
+          </div>
+        </div>
+
         <dl className="mt-6 space-y-2 rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm">
           <div className="flex justify-between">
             <dt className="text-zinc-400">Mitglied seit</dt>
@@ -141,7 +194,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
             </button>
             <button
               type="button"
-              onClick={() => void logout()}
+              onClick={() => void onLogout()}
               className="rounded-lg border border-zinc-600 px-4 py-2.5 font-semibold text-zinc-300 transition hover:bg-zinc-700"
             >
               Abmelden

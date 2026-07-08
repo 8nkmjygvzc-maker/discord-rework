@@ -35,6 +35,8 @@ model User {
   dmMemberships   DmMember[]
   attachments     Attachment[]
   voiceSession    VoiceSession?
+  invitesCreated  Invite[]           @relation("InviteCreator")
+  pushSubs        PushSubscription[]
 }
 
 // Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –
@@ -114,6 +116,7 @@ model Server {
   members  Membership[]
   channels Channel[]
   roles    Role[]
+  invites  Invite[]
 }
 
 model Membership {
@@ -266,6 +269,38 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime  @default(now())
   revokedAt DateTime?
+
+  @@index([userId])
+}
+
+// Phase 12: Einladungslinks. Kurzer Code → Server, optional mit Ablauf
+// (expiresAt) und/oder Nutzungslimit (maxUses; null = unbegrenzt). Ersetzt den
+// offenen „Beitritt per Server-ID“ aus Phase 3 als bevorzugten Weg.
+model Invite {
+  code      String    @id
+  serverId  String
+  server    Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  createdBy String
+  creator   User      @relation("InviteCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  maxUses   Int?
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([serverId])
+}
+
+// Phase 12: Web-Push-Subscription eines Geräts (Service Worker + VAPID). Der
+// Server speichert nur den öffentlichen Endpoint + die öffentlichen
+// Client-Schlüssel; damit kann er inhaltsarme Pushes an den Push-Dienst senden.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
 
   @@index([userId])
 }

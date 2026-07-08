@@ -41,6 +41,11 @@ export class PresenceService {
     if (refreshed === 0) await this.markOnline(user);
   }
 
+  /** true, wenn der Nutzer aktuell mindestens eine lebende Gateway-Verbindung hat. */
+  async isOnline(userId: string): Promise<boolean> {
+    return (await this.redis.client.exists(CONN_KEY_PREFIX + userId)) === 1;
+  }
+
   /** Meldet eine Verbindung ab. Liefert true, wenn der Nutzer dadurch offline GEHT (letzte Verbindung). */
   async markOffline(user: PresenceUser): Promise<boolean> {
     const key = CONN_KEY_PREFIX + user.id;

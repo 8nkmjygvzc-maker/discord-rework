@@ -3,6 +3,7 @@ import { Message, Prisma } from '@prisma/client';
 import { EncryptedMessageHeader, MessageHistoryResponse, MessageInfo } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { PushService } from '../push/push.service';
 import { ChannelAccessService } from './channel-access.service';
 import { SendMessageDto } from './dto/send-message.dto';
 
@@ -22,6 +23,7 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
+    private readonly push: PushService,
     private readonly channelAccess: ChannelAccessService,
   ) {}
 
@@ -64,7 +66,72 @@ export class MessagesService {
 
     const info = toMessageInfo(message);
     await this.gateway.publishDispatch('MESSAGE_CREATE', { message: info }, recipients);
+    // Web-Push für DMs (Phase 12): den offline DM-Partner benachrichtigen.
+    // Server-Kanäle laufen über den Erwähnungs-Hint (notifyMentions), weil der
+    // Server Erwähnungen im Ciphertext nicht erkennen kann. Best-effort.
+    void this.pushDirectMessage(channelId, userId, message.sender.username, recipients).catch(
+      () => undefined,
+    );
     return info;
+  }
+
+  /** Pusht bei einer DM-Nachricht den offline Partner (inhaltsarm). */
+  private async pushDirectMessage(
+    channelId: string,
+    senderId: string,
+    senderUsername: string,
+    recipients: string[],
+  ): Promise<void> {
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { type: true },
+    });
+    if (channel?.type !== 'DM') return;
+    const targets = recipients.filter((r) => r !== senderId);
+    await Promise.all(
+      targets.map((userId) =>
+        this.push.pushToUserIfOffline(userId, {
+          title: senderUsername,
+          body: 'Neue Direktnachricht',
+          url: '/',
+          tag: `dm:${channelId}`,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Erwähnungs-Push (Phase 12): der sendende Client meldet die erwähnten
+   * Mitglieder; der Server verifiziert die Sende-Berechtigung, filtert auf
+   * echte Kanal-Mitglieder und pusht die offline unter ihnen. Der Server sieht
+   * dabei keinen Nachrichtentext – nur wer erwähnt wurde (Metadaten).
+   */
+  async notifyMentions(
+    channelId: string,
+    senderId: string,
+    senderUsername: string,
+    userIds: string[],
+  ): Promise<void> {
+    // 'send' prüft die Sende-Berechtigung des Melders und liefert die
+    // zustellbaren Mitglieder (ViewChannels) als erlaubte Ziel-Menge.
+    const recipients = await this.channelAccess.requireChannelAccess(channelId, senderId, 'send');
+    const allowed = new Set(recipients);
+    const targets = [...new Set(userIds)].filter((u) => u !== senderId && allowed.has(u));
+    if (targets.length === 0) return;
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { name: true },
+    });
+    await Promise.all(
+      targets.map((userId) =>
+        this.push.pushToUserIfOffline(userId, {
+          title: senderUsername,
+          body: `hat dich in #${channel?.name ?? 'einem Kanal'} erwähnt`,
+          url: '/',
+          tag: `mention:${channelId}`,
+        }),
+      ),
+    );
   }
 
   /**

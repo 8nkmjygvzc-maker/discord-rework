@@ -15,6 +15,7 @@ interface ChannelSidebarProps {
   onCreateChannel: (type: 'TEXT' | 'VOICE') => void;
   onOpenProfile: () => void;
   onOpenRoles: () => void;
+  onOpenInvite: () => void;
 }
 
 /** Mittlere Spalte: Server-Kopf, Text-/Sprachkanäle, Voice-Panel, Nutzer-Panel. */
@@ -22,6 +23,7 @@ export default function ChannelSidebar({
   onCreateChannel,
   onOpenProfile,
   onOpenRoles,
+  onOpenInvite,
 }: ChannelSidebarProps) {
   const user = useAuthStore((s) => s.user);
   const server = useServersStore((s) => s.selectedServer);
@@ -36,6 +38,7 @@ export default function ChannelSidebar({
   const myPerms = server ? permissionsFromString(server.myPermissions) : 0n;
   const canManageChannels = hasPermission(myPerms, Permissions.ManageChannels);
   const canManageRoles = hasPermission(myPerms, Permissions.ManageRoles);
+  const canInvite = hasPermission(myPerms, Permissions.CreateInvite);
 
   const textChannels = server?.channels.filter((c) => c.type === 'TEXT') ?? [];
   const voiceChannels = server?.channels.filter((c) => c.type === 'VOICE') ?? [];
@@ -54,6 +57,16 @@ export default function ChannelSidebar({
             className="ml-auto rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
           >
             ID
+          </button>
+        )}
+        {server && canInvite && (
+          <button
+            type="button"
+            title="Zum Server einladen"
+            onClick={onOpenInvite}
+            className="rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+          >
+            Einladen
           </button>
         )}
         {server && canManageRoles && (

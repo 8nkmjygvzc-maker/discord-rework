@@ -7,4 +7,6 @@ export * from './permissions';
 export * from './e2ee';
 export * from './friends';
 export * from './voice';
+export * from './invites';
+export * from './push';
 export * from './crypto';

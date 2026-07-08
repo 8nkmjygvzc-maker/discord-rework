@@ -15,6 +15,8 @@ import { DmsModule } from './dms/dms.module';
 import { StorageModule } from './storage/storage.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { VoiceModule } from './voice/voice.module';
+import { InvitesModule } from './invites/invites.module';
+import { PushModule } from './push/push.module';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { VoiceModule } from './voice/voice.module';
     StorageModule,
     AttachmentsModule,
     VoiceModule,
+    InvitesModule,
+    PushModule,
   ],
 })
 export class AppModule {}

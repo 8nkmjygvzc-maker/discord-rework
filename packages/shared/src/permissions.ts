@@ -21,6 +21,8 @@ export const Permissions = {
   ManageMessages: 1n << 7n,
   /** Alle Rechte, unabhängig von anderen Bits. */
   Administrator: 1n << 8n,
+  /** Einladungslinks erstellen (Phase 12). */
+  CreateInvite: 1n << 9n,
 } as const;
 
 export type PermissionName = keyof typeof Permissions;
@@ -38,6 +40,7 @@ export const PERMISSION_LIST: { name: PermissionName; label: string }[] = [
   { name: 'KickMembers', label: 'Mitglieder kicken' },
   { name: 'BanMembers', label: 'Mitglieder bannen' },
   { name: 'ManageMessages', label: 'Nachrichten verwalten' },
+  { name: 'CreateInvite', label: 'Einladungen erstellen' },
   { name: 'Administrator', label: 'Administrator (alle Rechte)' },
 ];
 

@@ -26,6 +26,8 @@ interface ServersState {
   selectChannel: (channelId: string) => void;
   createServer: (name: string) => Promise<void>;
   joinServer: (serverId: string) => Promise<void>;
+  /** Einladungscode einlösen (Phase 12) und zum Server wechseln. */
+  acceptInvite: (code: string) => Promise<void>;
   leaveServer: (serverId: string) => Promise<void>;
   deleteServer: (serverId: string) => Promise<void>;
   createChannel: (name: string, type?: 'TEXT' | 'VOICE') => Promise<void>;
@@ -108,6 +110,18 @@ export const useServersStore = create<ServersState>()((set, get) => ({
 
   joinServer: async (serverId) => {
     const details = await authFetch<ServerDetails>(`/api/servers/${serverId}/join`, {
+      method: 'POST',
+    });
+    set((s) => ({
+      servers: [...s.servers.filter((x) => x.id !== details.id), toSummary(details)],
+      selectedServer: details,
+      selectedChannelId: details.channels.find((c) => c.type === 'TEXT')?.id ?? null,
+    }));
+    useVoiceStore.getState().setVoiceStates(details.voiceStates);
+  },
+
+  acceptInvite: async (code) => {
+    const details = await authFetch<ServerDetails>(`/api/invites/${encodeURIComponent(code)}`, {
       method: 'POST',
     });
     set((s) => ({
