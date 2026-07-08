@@ -6,6 +6,7 @@ import type {
   PresenceUpdatePayload,
   ReadyPayload,
   ServerMemberRemovePayload,
+  VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { GatewayClient } from './gateway';
 import { e2ee } from './e2ee';
@@ -16,6 +17,7 @@ import { useServersStore } from '../store/servers';
 import { useMessagesStore } from '../store/messages';
 import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
+import { useVoiceStore } from '../store/voice';
 
 /**
  * Die eine Gateway-Verbindung des Tabs. Verteilt Dispatch-Events an die
@@ -34,6 +36,9 @@ const client = new GatewayClient({
         void useFriendsStore.getState().loadFriends();
         void useDmsStore.getState().loadDms();
         void initCrypto();
+        // Falls wir vor dem Reconnect in einem Sprachkanal waren: Roster-Session
+        // serverseitig neu registrieren (die Medien-WS zum SFU läuft weiter).
+        void useVoiceStore.getState().reregisterAfterReconnect();
         return;
       case 'PRESENCE_UPDATE':
         usePresenceStore.getState().handlePresenceUpdate(d as PresenceUpdatePayload);
@@ -46,6 +51,9 @@ const client = new GatewayClient({
         return;
       case 'DM_CHANNEL_CREATE':
         useDmsStore.getState().handleDmCreate((d as { channel: DmChannelInfo }).channel);
+        return;
+      case 'VOICE_STATE_UPDATE':
+        useVoiceStore.getState().handleVoiceStateUpdate(d as VoiceStateUpdatePayload);
         return;
       case 'MESSAGE_CREATE':
         useMessagesStore.getState().handleMessageCreate((d as { message: MessageInfo }).message);
@@ -105,5 +113,6 @@ export const gateway = {
     useMessagesStore.getState().reset();
     useFriendsStore.getState().reset();
     useDmsStore.getState().reset();
+    useVoiceStore.getState().reset();
   },
 };

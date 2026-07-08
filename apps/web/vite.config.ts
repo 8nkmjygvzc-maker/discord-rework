@@ -21,6 +21,9 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3001',
       '/gateway': { target: 'ws://localhost:3001', ws: true },
+      // Signaling-WS zum mediasoup-SFU (Phase 10). Die Medienströme (UDP/TCP)
+      // laufen NICHT über diesen Proxy, sondern direkt an die mediasoup-Ports.
+      '/voice': { target: 'ws://localhost:3002', ws: true },
     },
   },
 });

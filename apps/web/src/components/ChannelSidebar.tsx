@@ -1,15 +1,23 @@
-import { hasPermission, Permissions, permissionsFromString } from '@parley/shared';
+import {
+  ChannelInfo,
+  hasPermission,
+  Permissions,
+  permissionsFromString,
+  VoiceState,
+} from '@parley/shared';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
+import { useVoiceStore } from '../store/voice';
 import UserFooter from './UserFooter';
+import VoicePanel from './VoicePanel';
 
 interface ChannelSidebarProps {
-  onCreateChannel: () => void;
+  onCreateChannel: (type: 'TEXT' | 'VOICE') => void;
   onOpenProfile: () => void;
   onOpenRoles: () => void;
 }
 
-/** Mittlere Spalte: Server-Kopf, Kanalliste, eigenes Nutzer-Panel unten. */
+/** Mittlere Spalte: Server-Kopf, Text-/Sprachkanäle, Voice-Panel, Nutzer-Panel. */
 export default function ChannelSidebar({
   onCreateChannel,
   onOpenProfile,
@@ -28,6 +36,10 @@ export default function ChannelSidebar({
   const myPerms = server ? permissionsFromString(server.myPermissions) : 0n;
   const canManageChannels = hasPermission(myPerms, Permissions.ManageChannels);
   const canManageRoles = hasPermission(myPerms, Permissions.ManageRoles);
+
+  const textChannels = server?.channels.filter((c) => c.type === 'TEXT') ?? [];
+  const voiceChannels = server?.channels.filter((c) => c.type === 'VOICE') ?? [];
+  const canDelete = canManageChannels && (server?.channels.length ?? 0) > 1;
 
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-zinc-900">
@@ -84,23 +96,14 @@ export default function ChannelSidebar({
       <div className="flex-1 overflow-y-auto px-2 py-3">
         {server && (
           <>
-            <div className="flex items-center justify-between px-2 pb-1">
-              <span className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
-                Textkanäle
-              </span>
-              {canManageChannels && (
-                <button
-                  type="button"
-                  title="Kanal erstellen"
-                  onClick={onCreateChannel}
-                  className="rounded px-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-                >
-                  +
-                </button>
-              )}
-            </div>
-            <ul className="space-y-0.5">
-              {server.channels.map((channel) => (
+            <SectionHeader
+              label="Textkanäle"
+              addTitle="Textkanal erstellen"
+              canAdd={canManageChannels}
+              onAdd={() => onCreateChannel('TEXT')}
+            />
+            <ul className="mb-4 space-y-0.5">
+              {textChannels.map((channel) => (
                 <li key={channel.id} className="group">
                   <button
                     type="button"
@@ -113,28 +116,151 @@ export default function ChannelSidebar({
                   >
                     <span className="text-zinc-500">#</span>
                     <span className="truncate">{channel.name}</span>
-                    {canManageChannels && server.channels.length > 1 && (
-                      <span
-                        role="button"
-                        title="Kanal löschen"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void deleteChannel(channel.id);
-                        }}
-                        className="ml-auto hidden rounded px-1 text-zinc-500 group-hover:inline hover:text-red-400"
-                      >
-                        ✕
-                      </span>
-                    )}
+                    {canDelete && <DeleteX onClick={() => void deleteChannel(channel.id)} />}
                   </button>
                 </li>
               ))}
+            </ul>
+
+            <SectionHeader
+              label="Sprachkanäle"
+              addTitle="Sprachkanal erstellen"
+              canAdd={canManageChannels}
+              onAdd={() => onCreateChannel('VOICE')}
+            />
+            <ul className="space-y-0.5">
+              {voiceChannels.map((channel) => (
+                <VoiceChannelRow key={channel.id} channel={channel} canDelete={canDelete} />
+              ))}
+              {voiceChannels.length === 0 && (
+                <li className="px-2 py-1 text-xs text-zinc-600">Noch keine Sprachkanäle</li>
+              )}
             </ul>
           </>
         )}
       </div>
 
+      <VoicePanel />
       <UserFooter onOpenProfile={onOpenProfile} />
     </aside>
+  );
+}
+
+function SectionHeader({
+  label,
+  addTitle,
+  canAdd,
+  onAdd,
+}: {
+  label: string;
+  addTitle: string;
+  canAdd: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between px-2 pb-1">
+      <span className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">{label}</span>
+      {canAdd && (
+        <button
+          type="button"
+          title={addTitle}
+          onClick={onAdd}
+          className="rounded px-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DeleteX({ onClick }: { onClick: () => void }) {
+  return (
+    <span
+      role="button"
+      title="Kanal löschen"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="ml-auto hidden rounded px-1 text-zinc-500 group-hover:inline hover:text-red-400"
+    >
+      ✕
+    </span>
+  );
+}
+
+/** Eine Sprachkanal-Zeile inkl. Teilnehmerliste darunter. */
+function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDelete: boolean }) {
+  const user = useAuthStore((s) => s.user);
+  const deleteChannel = useServersStore((s) => s.deleteChannel);
+  const activeChannelId = useVoiceStore((s) => s.activeChannelId);
+  const status = useVoiceStore((s) => s.status);
+  const joinVoice = useVoiceStore((s) => s.joinVoice);
+  const voiceStates = useVoiceStore((s) => s.voiceStates);
+  const selfMuted = useVoiceStore((s) => s.selfMuted);
+  const selfDeafened = useVoiceStore((s) => s.selfDeafened);
+
+  const participants = voiceStates.filter((v) => v.channelId === channel.id);
+  const isActive = activeChannelId === channel.id;
+  const connecting = isActive && status === 'connecting';
+
+  return (
+    <li className="group">
+      <button
+        type="button"
+        onClick={() => void joinVoice(channel)}
+        className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm ${
+          isActive ? 'text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+        }`}
+      >
+        <span className="text-zinc-500">🔊</span>
+        <span className="truncate">{channel.name}</span>
+        {connecting && <span className="text-xs text-amber-400">…</span>}
+        {canDelete && <DeleteX onClick={() => void deleteChannel(channel.id)} />}
+      </button>
+
+      {participants.length > 0 && (
+        <ul className="mt-0.5 mb-1 ml-6 space-y-0.5">
+          {participants.map((p) => (
+            <VoiceParticipant
+              key={p.userId}
+              state={p}
+              isSelf={p.userId === user?.id}
+              selfMuted={selfMuted}
+              selfDeafened={selfDeafened}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function VoiceParticipant({
+  state,
+  isSelf,
+  selfMuted,
+  selfDeafened,
+}: {
+  state: VoiceState;
+  isSelf: boolean;
+  selfMuted: boolean;
+  selfDeafened: boolean;
+}) {
+  // Für sich selbst den lokalen (sofortigen) Zustand zeigen, sonst den Roster-Stand.
+  const muted = isSelf ? selfMuted : state.muted;
+  const deafened = isSelf ? selfDeafened : state.deafened;
+  return (
+    <li className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-zinc-400">
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700/70 text-[10px] font-bold text-white">
+        {state.username.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="truncate">{state.username}</span>
+      <span className="ml-auto flex items-center gap-0.5">
+        {deafened && <span title="Ton aus">🔕</span>}
+        {muted && !deafened && <span title="Stumm">🔇</span>}
+      </span>
+    </li>
   );
 }

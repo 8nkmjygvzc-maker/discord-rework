@@ -1,5 +1,6 @@
 /** Typen für Server, Kanäle und Mitgliedschaften (Phase 3). */
 import type { RoleInfo } from './permissions';
+import type { VoiceState } from './voice';
 
 export type ChannelType = 'TEXT' | 'VOICE' | 'VIDEO' | 'DM';
 
@@ -37,6 +38,8 @@ export interface ServerDetails extends ServerSummary {
   roles: RoleInfo[];
   /** Effektive Rechte des anfragenden Nutzers (Bitfield als String). */
   myPermissions: string;
+  /** Aktuelle Sprachkanal-Belegung (Phase 10), gruppiert per channelId im Client. */
+  voiceStates: VoiceState[];
 }
 
 export interface CreateServerRequest {
@@ -50,6 +53,8 @@ export interface UpdateServerRequest {
 
 export interface CreateChannelRequest {
   name: string;
+  /** Voreinstellung TEXT; VOICE ab Phase 10. VIDEO folgt in Phase 11. */
+  type?: Extract<ChannelType, 'TEXT' | 'VOICE'>;
 }
 
 export interface UpdateChannelRequest {

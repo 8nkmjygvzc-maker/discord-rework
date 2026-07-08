@@ -1,7 +1,7 @@
 // Datenmodell (wächst phasenweise per Migration):
 // Phase 1: User, RefreshToken – Phase 3: Server, Membership, Channel –
 // Phase 4: Message – Phase 6: Device, KeyEnvelope – Phase 7: Friendship, DmMember –
-// Phase 8: Attachment
+// Phase 8: Attachment – Phase 10: VoiceSession
 
 generator client {
   provider = "prisma-client-js"
@@ -34,6 +34,7 @@ model User {
   friendshipsTo   Friendship[]   @relation("FriendshipsTo")
   dmMemberships   DmMember[]
   attachments     Attachment[]
+  voiceSession    VoiceSession?
 }
 
 // Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –
@@ -180,11 +181,31 @@ model Channel {
   dmKey     String?     @unique
   createdAt DateTime    @default(now())
 
-  messages    Message[]
-  dmMembers   DmMember[]
-  attachments Attachment[]
+  messages      Message[]
+  dmMembers     DmMember[]
+  attachments   Attachment[]
+  voiceSessions VoiceSession[]
 
   @@index([serverId])
+}
+
+// Phase 10: Wer sitzt gerade in welchem Sprachkanal. Ephemerer Zustand – die
+// API ist die Autorität (Roster + VOICE_STATE_UPDATE), der SFU-Service verwaltet
+// nur die Medien-Peers. `userId` ist unique: ein Nutzer ist zu einem Zeitpunkt
+// in höchstens EINEM Sprachkanal (wie Discord). Bewusste Abweichung von
+// CLAUDE.md §5: kein `sfuPeerId` – die Peer-Identität lebt im SFU, nicht in der
+// DB. Beim API-Start werden verwaiste Sessions geleert (siehe VoiceService).
+model VoiceSession {
+  id        String   @id @default(uuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  muted     Boolean  @default(false)
+  deafened  Boolean  @default(false)
+  joinedAt  DateTime @default(now())
+
+  @@index([channelId])
 }
 
 // Phase 6: Ende-zu-Ende-verschlüsselt. Der Server speichert nur Ciphertext,

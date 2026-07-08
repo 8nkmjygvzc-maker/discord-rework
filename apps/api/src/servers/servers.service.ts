@@ -79,7 +79,7 @@ export class ServersService {
     if (granted === null) throw new NotFoundException('Server nicht gefunden');
 
     const server = await this.prisma.server.findUniqueOrThrow({ where: { id: serverId } });
-    const [channels, members, roles] = await Promise.all([
+    const [channels, members, roles, voiceSessions] = await Promise.all([
       this.prisma.channel.findMany({
         where: { serverId },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
@@ -96,6 +96,11 @@ export class ServersService {
         where: { serverId },
         orderBy: [{ isDefault: 'desc' }, { position: 'asc' }],
       }),
+      this.prisma.voiceSession.findMany({
+        where: { channel: { serverId } },
+        include: { user: { select: { username: true } } },
+        orderBy: { joinedAt: 'asc' },
+      }),
     ]);
     return {
       ...toServerSummary(server),
@@ -103,6 +108,13 @@ export class ServersService {
       members: members.map(toServerMember),
       roles: roles.map(toRoleInfo),
       myPermissions: permissionsToString(granted),
+      voiceStates: voiceSessions.map((v) => ({
+        channelId: v.channelId,
+        userId: v.userId,
+        username: v.user.username,
+        muted: v.muted,
+        deafened: v.deafened,
+      })),
     };
   }
 
@@ -213,7 +225,12 @@ export class ServersService {
       select: { position: true },
     });
     const channel = await this.prisma.channel.create({
-      data: { serverId, name: dto.name, position: (last?.position ?? -1) + 1 },
+      data: {
+        serverId,
+        name: dto.name,
+        type: dto.type ?? 'TEXT',
+        position: (last?.position ?? -1) + 1,
+      },
     });
     const info = toChannelInfo(channel);
     await this.gateway.publishDispatch(

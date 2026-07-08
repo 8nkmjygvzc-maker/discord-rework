@@ -31,6 +31,7 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
   const loadDms = useDmsStore((s) => s.loadDms);
 
   const [dialog, setDialog] = useState<DialogKind>(null);
+  const [channelType, setChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
   const [home, setHome] = useState(false);
 
   // Initiales Laden (Gateway-READY lädt ebenfalls – hier zusätzlich, damit die
@@ -63,7 +64,10 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
       ) : (
         <>
           <ChannelSidebar
-            onCreateChannel={() => setDialog('createChannel')}
+            onCreateChannel={(type) => {
+              setChannelType(type);
+              setDialog('createChannel');
+            }}
             onOpenProfile={onOpenProfile}
             onOpenRoles={() => setDialog('roles')}
           />
@@ -86,7 +90,9 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
       {dialog === 'joinServer' && (
         <JoinServerDialog onClose={() => setDialog(null)} onSuccess={() => setHome(false)} />
       )}
-      {dialog === 'createChannel' && <CreateChannelDialog onClose={() => setDialog(null)} />}
+      {dialog === 'createChannel' && (
+        <CreateChannelDialog type={channelType} onClose={() => setDialog(null)} />
+      )}
       {dialog === 'roles' && <RolesDialog onClose={() => setDialog(null)} />}
     </div>
   );
@@ -190,14 +196,15 @@ function JoinServerDialog({ onClose, onSuccess }: { onClose: () => void; onSucce
   );
 }
 
-function CreateChannelDialog({ onClose }: { onClose: () => void }) {
+function CreateChannelDialog({ type, onClose }: { type: 'TEXT' | 'VOICE'; onClose: () => void }) {
   const createChannel = useServersStore((s) => s.createChannel);
+  const isVoice = type === 'VOICE';
   return (
-    <Modal title="Kanal erstellen" onClose={onClose}>
+    <Modal title={isVoice ? 'Sprachkanal erstellen' : 'Textkanal erstellen'} onClose={onClose}>
       <DialogForm
-        placeholder="Name des Kanals"
+        placeholder={isVoice ? 'Name des Sprachkanals' : 'Name des Textkanals'}
         submitLabel="Erstellen"
-        onSubmit={createChannel}
+        onSubmit={(name) => createChannel(name, type)}
         onClose={onClose}
       />
     </Modal>

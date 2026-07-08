@@ -8,11 +8,13 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @parley/shared && npm run build -w @parley/api && npm run build -w @parley/web",
+    "build": "npm run build -w @parley/shared && npm run build -w @parley/api && npm run build -w @parley/voice && npm run build -w @parley/web",
     "build:shared": "npm run build -w @parley/shared",
     "dev:api": "npm run dev -w @parley/api",
     "dev:web": "npm run dev -w @parley/web",
+    "dev:voice": "npm run dev -w @parley/voice",
     "start:api": "npm run start -w @parley/api",
+    "start:voice": "npm run start -w @parley/voice",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

@@ -4,6 +4,7 @@ import { usePresenceStore } from '../store/presence';
 import ChatView from './ChatView';
 import FriendsPanel from './FriendsPanel';
 import UserFooter from './UserFooter';
+import VoicePanel from './VoicePanel';
 
 interface HomeViewProps {
   onOpenProfile: () => void;
@@ -77,6 +78,7 @@ export default function HomeView({ onOpenProfile }: HomeViewProps) {
           </ul>
         </div>
 
+        <VoicePanel />
         <UserFooter onOpenProfile={onOpenProfile} />
       </aside>
 

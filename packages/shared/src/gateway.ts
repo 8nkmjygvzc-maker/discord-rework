@@ -66,7 +66,10 @@ export type GatewayEventType =
   // Additiver Presence-Nachschub, wenn der Sichtbarkeitskreis wächst
   // (Server-Beitritt) – Presence ist seit Phase 7 auf Freunde + gemeinsame
   // Server-Mitglieder beschränkt statt global.
-  | 'PRESENCE_SYNC';
+  | 'PRESENCE_SYNC'
+  // Phase 10 – Sprachchat: Beitritt/Verlassen eines Sprachkanals bzw.
+  // Mute-/Deafen-Wechsel (an Server-Mitglieder mit ViewChannels).
+  | 'VOICE_STATE_UPDATE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {

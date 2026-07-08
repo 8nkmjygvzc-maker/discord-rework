@@ -12,6 +12,7 @@ import {
   ServerSummary,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
+import { useVoiceStore } from './voice';
 
 interface ServersState {
   servers: ServerSummary[];
@@ -27,7 +28,7 @@ interface ServersState {
   joinServer: (serverId: string) => Promise<void>;
   leaveServer: (serverId: string) => Promise<void>;
   deleteServer: (serverId: string) => Promise<void>;
-  createChannel: (name: string) => Promise<void>;
+  createChannel: (name: string, type?: 'TEXT' | 'VOICE') => Promise<void>;
   deleteChannel: (channelId: string) => Promise<void>;
 
   createRole: (name: string) => Promise<void>;
@@ -73,16 +74,21 @@ export const useServersStore = create<ServersState>()((set, get) => ({
   selectServer: async (serverId) => {
     if (!serverId) {
       set({ selectedServer: null, selectedChannelId: null });
+      useVoiceStore.getState().setVoiceStates([]);
       return;
     }
     const details = await authFetch<ServerDetails>(`/api/servers/${serverId}`);
     set((s) => ({
       selectedServer: details,
-      // Kanalauswahl behalten, wenn der Kanal noch existiert, sonst erster Kanal.
-      selectedChannelId: details.channels.some((c) => c.id === s.selectedChannelId)
+      // Textkanal-Auswahl behalten, wenn er noch existiert, sonst erster Textkanal.
+      selectedChannelId: details.channels.some(
+        (c) => c.id === s.selectedChannelId && c.type === 'TEXT',
+      )
         ? s.selectedChannelId
-        : (details.channels[0]?.id ?? null),
+        : (details.channels.find((c) => c.type === 'TEXT')?.id ?? null),
     }));
+    // Voice-Roster des Servers in den Voice-Store spiegeln.
+    useVoiceStore.getState().setVoiceStates(details.voiceStates);
   },
 
   selectChannel: (channelId) => set({ selectedChannelId: channelId }),
@@ -95,8 +101,9 @@ export const useServersStore = create<ServersState>()((set, get) => ({
     set((s) => ({
       servers: [...s.servers, toSummary(details)],
       selectedServer: details,
-      selectedChannelId: details.channels[0]?.id ?? null,
+      selectedChannelId: details.channels.find((c) => c.type === 'TEXT')?.id ?? null,
     }));
+    useVoiceStore.getState().setVoiceStates(details.voiceStates);
   },
 
   joinServer: async (serverId) => {
@@ -106,8 +113,9 @@ export const useServersStore = create<ServersState>()((set, get) => ({
     set((s) => ({
       servers: [...s.servers.filter((x) => x.id !== details.id), toSummary(details)],
       selectedServer: details,
-      selectedChannelId: details.channels[0]?.id ?? null,
+      selectedChannelId: details.channels.find((c) => c.type === 'TEXT')?.id ?? null,
     }));
+    useVoiceStore.getState().setVoiceStates(details.voiceStates);
   },
 
   leaveServer: async (serverId) => {
@@ -120,14 +128,14 @@ export const useServersStore = create<ServersState>()((set, get) => ({
     get().handleGatewayEvent('SERVER_DELETE', { serverId } satisfies ServerDeletePayload);
   },
 
-  createChannel: async (name) => {
+  createChannel: async (name, type = 'TEXT') => {
     const serverId = get().selectedServer?.id;
     if (!serverId) return;
     // Der Kanal kommt zusätzlich als CHANNEL_CREATE-Event zurück; das Update
     // hier sorgt nur dafür, dass der Ersteller nicht auf das Event warten muss.
     const channel = await authFetch<ChannelInfo>(`/api/servers/${serverId}/channels`, {
       method: 'POST',
-      body: { name },
+      body: { name, type },
     });
     get().handleGatewayEvent('CHANNEL_CREATE', { channel });
   },
@@ -293,7 +301,8 @@ export const useServersStore = create<ServersState>()((set, get) => ({
           ].sort(byPosition);
           return {
             selectedServer: { ...s.selectedServer, channels },
-            selectedChannelId: s.selectedChannelId ?? channel.id,
+            // Nur Textkanäle automatisch auswählen (Voice-Kanäle öffnen keinen Chat).
+            selectedChannelId: s.selectedChannelId ?? (channel.type === 'TEXT' ? channel.id : null),
           };
         });
         return;

@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 9 abgeschlossen (07.07.2026)
+## Status: Phase 10 abgeschlossen (08.07.2026)
 
 ## Erledigt
 
@@ -130,9 +130,24 @@ Wie Phase 5–8 kam die Implementierung als angelieferter Commit (`34d0b6a`); di
 
 **Verifiziert:** Shared-Unit-Tests 21 (neu: Emoji-Plausibilität, ID-Validierung, replyTo-Roundtrip). Skript mit 19 Checks, alle grün – u. a. replyTo-Roundtrip mit Preview-Klemmung, Reaktions-add/remove in beide Richtungen (live über Gateway), fünf böswillige Payloads (Text-als-Emoji, ASCII-Bausteine, Selector-Injektion, kaputte IDs, unbekannte action) werden beim Empfänger verworfen, Reaktions-Events liegen als normale Nachrichten in der History. DB-Check: Header eines Reaktions-Events enthält nur `{iteration,keyId,signature,v}`, kein Klartext-/Emoji-/Erwähnungs-Leak in Ciphertext oder Header. Interop UI↔Skript: UI-Nachricht wird vom Skript entschlüsselt; Skript-Antwort (Zitat-Zeile), ❤️-Reaktion (Chip), Erwähnung (gelbes Highlight) und Geist-Zitat auf nicht geladene Nachricht erscheinen live und korrekt in der UI; UI-Reaktion 👍 add→remove kommt beim Skript entschlüsselt und korrekt an; Thread-Ansicht (2 Nachrichten, sauberes Schließen), Sprung-zum-Original mit Aufleuchten, Suche (1 Treffer); Reload: Reaktionen werden aus der History neu gefaltet, Highlight/Zitat intakt; Konsole sauber. Build/Tests (32)/Lint/Format grün.
 
+### Phase 10 – Sprachchat (08.07.2026)
+
+Erste Phase mit neuem Teilprojekt (`apps/voice`, mediasoup-SFU) und selbst gebaut (kein angelieferter Commit). Zwei getrennte Signaling-Ebenen: **Roster/State** (beitreten/verlassen, Mute/Deafen, „wer ist im Kanal") über REST + bestehendes Gateway; **Medien** (WebRTC-Transport/Produce/Consume) über eine direkte WebSocket zum SFU. Medien sind zunächst nur transportverschlüsselt (DTLS-SRTP); Medien-E2EE steht in der ROADMAP.
+
+- **mediasoup läuft portabel:** `npm install mediasoup@3` lädt ein vorgebautes `mediasoup-worker.exe` (kein Compiler/Python/MSVC nötig) – Worker startet, Router + WebRTC-Transporte funktionieren
+- **Shared** (`packages/shared/src/voice.ts`): Voice-Signaling-Protokoll (Client⇄SFU, opake mediasoup-Wire-Objekte als `unknown`, damit shared nicht von mediasoup abhängt), `VoiceState`, `VOICE_STATE_UPDATE`-Event, `VoiceJoinResponse`, `VoiceTokenClaims`; `ServerDetails.voiceStates`; `CreateChannelRequest.type`
+- **Prisma:** `VoiceSession` (userId unique = ein Nutzer/ein Sprachkanal, muted/deafened); Migration `voice`. **Abweichung von CLAUDE.md §5:** kein `sfuPeerId` – Peer-Identität lebt im SFU. Beim API-Start werden verwaiste Sessions geleert
+- **API** (`apps/api/src/voice/`): `POST /voice/channels/:id/join` (Rechte = ViewChannels, VoiceSession-Upsert, Broadcast, kurzlebiges **Voice-Token** = JWT mit channelId/purpose), `POST …/leave`, `PATCH …/state` (Mute/Deafen, Deafen erzwingt Mute); Roster-Broadcast an Mitglieder mit ViewChannels (wie MESSAGE_CREATE); SFU meldet Trennungen via Redis `voice:disconnect` → Roster-Cleanup (crash-fest). Kanal-Erstellung akzeptiert jetzt `type` (TEXT/VOICE)
+- **SFU** (`apps/voice/`, neues Workspace): eigenständiger Node-Dienst (mediasoup, ws, ioredis, jsonwebtoken; `tsx` für Dev). Ein Worker, ein Router pro Kanal (`Room`), Peer pro Medien-WS; Signaling-Protokoll (auth→welcome, getRtpCapabilities, createTransport, connect, produce, consume, resume, pause; Benachrichtigungen newProducer/producerClosed/peerLeft). Zweit-Verbindung desselben Nutzers ersetzt die alte ohne fälschliches Trenn-Signal
+- **Web** (`apps/web`): `lib/voice.ts` (mediasoup-client: Device, Send-/Recv-Transporte, Mikro-Producer, Consumer + versteckte `<audio>`-Elemente; **ohne Mikro sauberer Zuhörer-Modus** statt Fehler), `store/voice.ts` (Beitritt/Verlassen/Mute/Deafen + Roster), Kanal-Sidebar mit getrennten Text-/Sprach-Sektionen und Teilnehmerliste je Sprachkanal, `VoicePanel` (verbunden/Mute/Deafen/Trennen, bleibt server-übergreifend sichtbar), Kanal-Erstellung mit Typ; nach Gateway-Reconnect wird die Voice-Session serverseitig neu registriert; Vite-Proxy `/voice`
+- **Infra:** `.env`/`.env.example` (VOICE_PORT, VOICE_PUBLIC_URL, MEDIASOUP_*), `scripts/dev-voice.cmd`, launch.json-Eintrag `voice`, Root-Skripte `dev:voice`/`start:voice`, Voice im Root-`build`
+
+**Verifiziert:** Signaling-Skript mit **36 Checks, alle grün** (zwei Nutzer gegen den echten SFU, fabrizierte gültige Opus-RTP-Parameter): Beitritts-Autorisierung (Nicht-Mitglied/Text-Kanal/unbekannt → 404), Join → Token + Roster-Broadcast + `voiceStates` in ServerDetails, Medien-Handshake (welcome, Opus-Caps, Transport mit ICE/DTLS, produce), cross-peer getProducers/consume/resumeConsumer/newProducer, Mute (+pauseProducer) und Deafen (Server erzwingt Mute), ungültiges Token → authError, explizit Verlassen (Broadcast null + SFU peerLeft + Roster-Cleanup), Absturz-Cleanup (WS-Close → Redis → Roster), Kanalwechsel (eine Session). **Browser-Test** (Preview): Sprachkanal anlegen (Typ-Umschaltung), Beitritt → Zuhörer-Modus („Kein Mic", getUserMedia headless → sauberer Fallback), Self im Roster, VoicePanel „Sprache verbunden"; zweiter (Node-)Teilnehmer erscheint live im Roster und wird **real konsumiert** (Audio-Element mit lebendem Track = echter ICE/DTLS-Handshake zum SFU), Deafen schaltet den eingehenden Strom stumm (`audio.muted`), Verlassen baut Medien ab und entfernt Self. Build/Tests (32)/Lint/Format grün.
+_Hinweis:_ Echtes 2-Wege-Audio zwischen zwei Menschen braucht Mikrofone (manueller Test) – die Medien-Kontrollebene ist automatisiert vollständig verifiziert.
+
 ## Nächste Phase
 
-**Phase 10 – Sprachchat:** mediasoup-Integration (`apps/voice` als eigener SFU-Service laut Architektur), Sprachkanäle beitreten/verlassen, Mute/Deafen. Erste Phase mit neuem Teilprojekt – Signaling läuft über das bestehende Gateway/REST, Media über mediasoup. Voice ist zunächst nur transportverschlüsselt (DTLS-SRTP), E2EE für Medien steht in der ROADMAP.
+**Phase 11 – Video & Bildschirmfreigabe:** Video-Streams und Screen-Share über dieselbe mediasoup-Infrastruktur. Router-Codecs um VP8/H264 erweitern (in `apps/voice/src/mediasoup-manager.ts`), der Client produziert zusätzlich einen Video-/Screen-Track, die Signaling- und Roster-Ebene aus Phase 10 trägt bereits `kind: 'audio' | 'video'`.
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 
@@ -154,3 +169,4 @@ Diese Maschine war frisch aufgesetzt (kein Node, kein Docker, WSL defekt). Docke
 - Testnutzer in der (portablen) Dev-DB: `arian.test@example.com` / `frieda.test@example.com` (Benutzernamen `arian`/`frieda`), Passwort jeweils `test-passwort-123`
 - Session 4 (06.07.2026): Dev-DB stand nur auf der Phase-1-Migration – `servers_channels`, `messages` und `roles` per `prisma migrate deploy` nachgezogen; Server „Arians Treffpunkt“ (Owner `arian_test`) neu angelegt, alte Server/Nachrichten waren weg
 - `core.autocrlf=true` ist global gesetzt – `.gitattributes` pinnt deshalb LF für den Working Tree; nach einem frischen Checkout ggf. einmal `git add --renormalize .` bzw. Prettier laufen lassen
+- Session 7 (08.07.2026, Phase 10): Die portable Infra (`parley-infra`) war wieder weg, **Docker Desktop dagegen zurück** – Infrastruktur läuft jetzt wieder per `docker compose -f infra/docker-compose.yml up -d` (Postgres/Redis/MinIO, healthy). Die Docker-DB stand bereits auf allen 7 Migrationen; `voice` per `prisma migrate dev` ergänzt. Docker-Daemon ggf. erst per „Docker Desktop.exe" starten (Daemon-Bereitschaft mit `docker info` abwarten). **Neuer dritter Dienst:** Voice-SFU – zum Testen von Sprachchat muss `npm run dev:voice` (Port 3002) zusätzlich zu API/Web laufen (Preview-Config `voice`). Phase 10 hat einen „Voice Testserver" (Owner `voicetester`) samt `peer2_…`-Wegwerfnutzern in der Docker-Dev-DB hinterlassen

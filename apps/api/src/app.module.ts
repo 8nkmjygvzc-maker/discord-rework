@@ -14,6 +14,7 @@ import { FriendsModule } from './friends/friends.module';
 import { DmsModule } from './dms/dms.module';
 import { StorageModule } from './storage/storage.module';
 import { AttachmentsModule } from './attachments/attachments.module';
+import { VoiceModule } from './voice/voice.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     DmsModule,
     StorageModule,
     AttachmentsModule,
+    VoiceModule,
   ],
 })
 export class AppModule {}
