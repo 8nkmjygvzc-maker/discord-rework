@@ -18,6 +18,14 @@
 
 // --- Ebene 1: Roster/State (über REST + Gateway) -----------------------------
 
+/**
+ * Quelle eines Medien-Producers (Phase 10/11). `mic` = Mikrofon (Audio),
+ * `cam` = Kamera-Video, `screen` = Bildschirmfreigabe (Video). Wird als
+ * appData am mediasoup-Producer geführt, damit Clients Kamera von Screen-Share
+ * unterscheiden und richtig rendern können.
+ */
+export type VoiceSource = 'mic' | 'cam' | 'screen';
+
 /** Zustand eines Nutzers in einem Sprachkanal (Teil von ServerDetails). */
 export interface VoiceState {
   channelId: string;
@@ -27,6 +35,10 @@ export interface VoiceState {
   muted: boolean;
   /** Deafen: hört niemanden (impliziert stumm). */
   deafened: boolean;
+  /** Kamera aktiv (Phase 11). */
+  cameraOn: boolean;
+  /** Bildschirmfreigabe aktiv (Phase 11). */
+  screenOn: boolean;
 }
 
 /**
@@ -38,7 +50,7 @@ export interface VoiceStateUpdatePayload {
   channelId: string;
   userId: string;
   username: string;
-  state: { muted: boolean; deafened: boolean } | null;
+  state: { muted: boolean; deafened: boolean; cameraOn: boolean; screenOn: boolean } | null;
 }
 
 /** Antwort auf POST /api/voice/channels/:id/join. */
@@ -55,6 +67,8 @@ export interface VoiceJoinResponse {
 export interface VoiceStateChangeRequest {
   muted: boolean;
   deafened: boolean;
+  cameraOn: boolean;
+  screenOn: boolean;
 }
 
 // --- Ebene 2: Medien-Signaling (Client ⇄ SFU über WebSocket) -----------------
