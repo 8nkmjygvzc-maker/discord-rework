@@ -156,9 +156,17 @@ export class InvitesService {
 }
 
 function generateCode(): string {
-  const bytes = randomBytes(CODE_LENGTH);
+  // Rejection Sampling: Bytes ≥ 248 verwerfen, sonst wären die ersten
+  // 256 % 62 = 8 Alphabet-Zeichen leicht bevorzugt (Modulo-Bias).
+  const limit = 256 - (256 % CODE_ALPHABET.length);
   let out = '';
-  for (let i = 0; i < CODE_LENGTH; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  while (out.length < CODE_LENGTH) {
+    for (const byte of randomBytes(CODE_LENGTH * 2)) {
+      if (byte >= limit) continue;
+      out += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+      if (out.length === CODE_LENGTH) break;
+    }
+  }
   return out;
 }
 

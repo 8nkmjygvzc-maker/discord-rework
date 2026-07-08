@@ -49,22 +49,12 @@ export default function ChannelSidebar({
       {/* Server-Kopf */}
       <header className="flex items-center justify-between border-b border-zinc-950/50 px-4 py-3 shadow">
         <h1 className="truncate font-bold text-zinc-100">{server?.name ?? 'Kein Server'}</h1>
-        {server && (
-          <button
-            type="button"
-            title="Server-ID kopieren (zum Einladen teilen)"
-            onClick={() => void navigator.clipboard.writeText(server.id)}
-            className="ml-auto rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-          >
-            ID
-          </button>
-        )}
         {server && canInvite && (
           <button
             type="button"
             title="Zum Server einladen"
             onClick={onOpenInvite}
-            className="rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+            className="ml-auto rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
           >
             Einladen
           </button>

@@ -64,13 +64,8 @@ export class ServersController {
     return this.servers.deleteServer(id, user.sub);
   }
 
-  @Post('servers/:id/join')
-  join(
-    @CurrentUser() user: AccessTokenPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<ServerDetails> {
-    return this.servers.join(id, user.sub);
-  }
+  // Beitritt läuft seit Phase 12 ausschließlich über Einladungscodes
+  // (POST /api/invites/:code) – der offene Beitritt per Server-ID ist entfernt.
 
   @Post('servers/:id/leave')
   @HttpCode(HttpStatus.NO_CONTENT)

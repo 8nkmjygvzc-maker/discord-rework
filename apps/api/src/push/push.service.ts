@@ -6,6 +6,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PresenceService } from '../gateway/presence.service';
 import { SubscribeDto } from './dto/subscribe.dto';
 
+/** Mehr braucht kein Mensch: großzügiges Limit gespeicherter Browser pro Konto. */
+const MAX_SUBSCRIPTIONS_PER_USER = 10;
+
 /**
  * Web-Push (Phase 12). Sendet inhaltsarme Benachrichtigungen an die beim Nutzer
  * registrierten Browser-Subscriptions – aber nur, wenn er OFFLINE ist (bei
@@ -60,6 +63,19 @@ export class PushService implements OnModuleInit {
       // mit aktualisieren, damit die Subscription dem aktuellen Nutzer gehört.
       update: { userId, p256dh: dto.keys.p256dh, auth: dto.keys.auth },
     });
+    // Deckel pro Nutzer: die ältesten Subscriptions über dem Limit entfernen –
+    // sonst könnte ein Konto die Tabelle unbegrenzt wachsen lassen.
+    const excess = await this.prisma.pushSubscription.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      skip: MAX_SUBSCRIPTIONS_PER_USER,
+      select: { id: true },
+    });
+    if (excess.length > 0) {
+      await this.prisma.pushSubscription.deleteMany({
+        where: { id: { in: excess.map((e) => e.id) } },
+      });
+    }
   }
 
   /** Entfernt eine Subscription dieses Nutzers (Abmelden / Logout). */

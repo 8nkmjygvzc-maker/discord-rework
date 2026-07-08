@@ -40,8 +40,9 @@ export class InvitesController {
     return this.invites.list(id, user.sub);
   }
 
-  /** Vorschau eines Codes (ohne beizutreten). */
+  /** Vorschau eines Codes (ohne beizutreten). Rate-Limit gegen Code-Raten. */
   @Get('invites/:code')
+  @RateLimit({ limit: 30, windowS: 60 })
   preview(
     @CurrentUser() user: AccessTokenPayload,
     @Param('code') code: string,

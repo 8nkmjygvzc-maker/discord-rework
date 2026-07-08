@@ -48,7 +48,6 @@ Refresh-Token: httpOnly-Cookie `parley_refresh` (Pfad `/api/auth`), 30 Tage, rot
 | GET     | `/api/servers/:id`          | Details (Kanäle + Mitglieder, nur Mitglieder)     |
 | PATCH   | `/api/servers/:id`          | umbenennen/Icon (nur Owner)                       |
 | DELETE  | `/api/servers/:id`          | löschen (nur Owner)                               |
-| POST    | `/api/servers/:id/join`     | beitreten per Server-ID (Invites: Phase 12)       |
 | POST    | `/api/servers/:id/leave`    | verlassen (Owner nicht)                           |
 | POST    | `/api/servers/:id/channels` | Kanal anlegen (nur Owner)                         |
 | PATCH   | `/api/channels/:id`         | Kanal umbenennen/verschieben (nur Owner)          |
@@ -57,6 +56,8 @@ Refresh-Token: httpOnly-Cookie `parley_refresh` (Pfad `/api/auth`), 30 Tage, rot
 Änderungen werden zusätzlich als Gateway-Events an die betroffenen Mitglieder
 dispatcht (`SERVER_*`, `CHANNEL_*` – gezielt über `publishDispatch(..., userIds)`).
 „Nur Owner“ gilt bis Phase 5 – dann übernimmt das Rollen-/Berechtigungssystem.
+Der frühere `POST /api/servers/:id/join` (Beitritt per Server-ID) ist seit
+Phase 12 entfernt – beitreten geht nur noch über Einladungscodes (s. u.).
 
 ## Endpoints (Phase 4 – Nachrichten, Bearer-Auth)
 
@@ -129,6 +130,38 @@ pro Nachricht; schlägt das Binden fehl, wird auch die Nachricht zurückgerollt.
 Aufräumen: nie gebundene Uploads entsorgt ein periodischer Job (beim Start und
 stündlich, Frist 6 h); Kanal-/Server-Löschung entfernt die Blobs des Kanals
 best-effort aus MinIO (`StorageService.removeAllWithPrefix`).
+
+## Einladungen & Web-Push (Phase 12)
+
+Einladungscodes (8 Zeichen base62) verweisen auf einen Server, optional mit
+Ablaufdatum und/oder Nutzungslimit; Nutzungen werden atomar verbraucht
+(parallele Einlösungen können ein Limit nicht überschreiten). Erstellen/Listen
+verlangt das `CreateInvite`-Recht (nicht in der Standardrolle), Einlösen kann
+jeder angemeldete Nutzer mit gültigem Code.
+
+| Methode | Pfad                       | Zweck                                                        |
+| ------- | -------------------------- | ------------------------------------------------------------ |
+| POST    | `/api/servers/:id/invites` | Einladung erstellen (CreateInvite)                           |
+| GET     | `/api/servers/:id/invites` | Einladungen des Servers (CreateInvite)                       |
+| GET     | `/api/invites/:code`       | Vorschau (Name, Mitgliederzahl, Einlader; 404 wenn ungültig) |
+| POST    | `/api/invites/:code`       | einlösen → Beitritt (Wieder-Einlösen verbraucht nichts)      |
+| DELETE  | `/api/invites/:code`       | widerrufen (Ersteller oder ManageServer)                     |
+
+Web-Push (`push/`-Modul, `web-push` + VAPID): Push geht nur an Nutzer OHNE
+aktive Gateway-Verbindung und ist wegen E2EE inhaltsarm (Absender/Kanal als
+Metadaten, kein Nachrichtentext). DM-Nachrichten pushen den Offline-Partner
+automatisch; für Server-Kanäle meldet der sendende Client Erwähnte über
+`POST /api/channels/:id/notify-mentions` (Server prüft die Sende-Berechtigung
+und filtert auf Kanal-Mitglieder). Subscription-Endpoints müssen https sein
+(SSRF-Schutz), max. 10 pro Nutzer; 404/410 vom Push-Dienst löscht die
+Subscription. Ohne `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` in `.env` ist Push
+deaktiviert (Schlüssel erzeugen: `node -e "console.log(require('web-push').generateVAPIDKeys())"`).
+
+| Methode | Pfad                         | Zweck                                    |
+| ------- | ---------------------------- | ---------------------------------------- |
+| GET     | `/api/push/vapid-public-key` | öffentlicher VAPID-Schlüssel (leer=aus)  |
+| POST    | `/api/push/subscribe`        | Browser-Subscription registrieren        |
+| POST    | `/api/push/unsubscribe`      | Subscription entfernen (Logout/Schalter) |
 
 ## Datenbank
 
