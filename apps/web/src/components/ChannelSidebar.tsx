@@ -200,6 +200,8 @@ function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDele
   const voiceStates = useVoiceStore((s) => s.voiceStates);
   const selfMuted = useVoiceStore((s) => s.selfMuted);
   const selfDeafened = useVoiceStore((s) => s.selfDeafened);
+  const selfCameraOn = useVoiceStore((s) => s.selfCameraOn);
+  const selfScreenOn = useVoiceStore((s) => s.selfScreenOn);
 
   const participants = voiceStates.filter((v) => v.channelId === channel.id);
   const isActive = activeChannelId === channel.id;
@@ -229,6 +231,8 @@ function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDele
               isSelf={p.userId === user?.id}
               selfMuted={selfMuted}
               selfDeafened={selfDeafened}
+              selfCameraOn={selfCameraOn}
+              selfScreenOn={selfScreenOn}
             />
           ))}
         </ul>
@@ -242,15 +246,21 @@ function VoiceParticipant({
   isSelf,
   selfMuted,
   selfDeafened,
+  selfCameraOn,
+  selfScreenOn,
 }: {
   state: VoiceState;
   isSelf: boolean;
   selfMuted: boolean;
   selfDeafened: boolean;
+  selfCameraOn: boolean;
+  selfScreenOn: boolean;
 }) {
   // Für sich selbst den lokalen (sofortigen) Zustand zeigen, sonst den Roster-Stand.
   const muted = isSelf ? selfMuted : state.muted;
   const deafened = isSelf ? selfDeafened : state.deafened;
+  const cameraOn = isSelf ? selfCameraOn : state.cameraOn;
+  const screenOn = isSelf ? selfScreenOn : state.screenOn;
   return (
     <li className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-zinc-400">
       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700/70 text-[10px] font-bold text-white">
@@ -258,6 +268,8 @@ function VoiceParticipant({
       </span>
       <span className="truncate">{state.username}</span>
       <span className="ml-auto flex items-center gap-0.5">
+        {screenOn && <span title="Teilt den Bildschirm">🖥️</span>}
+        {cameraOn && <span title="Kamera an">📹</span>}
         {deafened && <span title="Ton aus">🔕</span>}
         {muted && !deafened && <span title="Stumm">🔇</span>}
       </span>

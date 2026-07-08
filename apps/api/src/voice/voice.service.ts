@@ -76,18 +76,32 @@ export class VoiceService implements OnModuleInit {
     }
 
     // Upsert = idempotent: deckt Erstbeitritt UND Reconnect-Rejoin ab; Mute/
-    // Deafen werden beim (Neu-)Beitritt zurückgesetzt.
+    // Deafen/Kamera/Screen werden beim (Neu-)Beitritt zurückgesetzt.
     await this.prisma.voiceSession.upsert({
       where: { userId },
-      create: { userId, channelId, muted: false, deafened: false },
-      update: { channelId, muted: false, deafened: false, joinedAt: new Date() },
+      create: {
+        userId,
+        channelId,
+        muted: false,
+        deafened: false,
+        cameraOn: false,
+        screenOn: false,
+      },
+      update: {
+        channelId,
+        muted: false,
+        deafened: false,
+        cameraOn: false,
+        screenOn: false,
+        joinedAt: new Date(),
+      },
     });
 
     await this.broadcast(channel.serverId, {
       channelId,
       userId,
       username,
-      state: { muted: false, deafened: false },
+      state: { muted: false, deafened: false, cameraOn: false, screenOn: false },
     });
 
     const claims: VoiceTokenClaims = { sub: userId, username, channelId, purpose: 'voice' };
@@ -106,7 +120,11 @@ export class VoiceService implements OnModuleInit {
     await this.removeSession(channelId, userId, username);
   }
 
-  /** Mute/Deafen umschalten. Deafen impliziert Mute (man kann nicht hören und sprechen wollen). */
+  /**
+   * Selbst gemeldeten Zustand aktualisieren: Mute/Deafen (Deafen impliziert
+   * Mute) sowie Kamera-/Bildschirm-Anzeige (Phase 11). Der Server vertraut dem
+   * Client – die tatsächlichen Medien werden vom SFU verwaltet.
+   */
   async updateState(
     userId: string,
     username: string,
@@ -122,15 +140,17 @@ export class VoiceService implements OnModuleInit {
     }
     const muted = dto.muted || dto.deafened;
     const deafened = dto.deafened;
+    const cameraOn = dto.cameraOn;
+    const screenOn = dto.screenOn;
     await this.prisma.voiceSession.update({
       where: { userId },
-      data: { muted, deafened },
+      data: { muted, deafened, cameraOn, screenOn },
     });
     await this.broadcast(session.channel.serverId, {
       channelId,
       userId,
       username,
-      state: { muted, deafened },
+      state: { muted, deafened, cameraOn, screenOn },
     });
   }
 

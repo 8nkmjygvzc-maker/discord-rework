@@ -114,6 +114,8 @@ export class ServersService {
         username: v.user.username,
         muted: v.muted,
         deafened: v.deafened,
+        cameraOn: v.cameraOn,
+        screenOn: v.screenOn,
       })),
     };
   }

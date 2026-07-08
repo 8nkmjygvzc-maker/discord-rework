@@ -6,11 +6,12 @@ import type {
   VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
-import { VoiceClient } from '../lib/voice';
+import { VoiceClient, type VideoTile } from '../lib/voice';
 
 /**
- * Voice-Zustand (Phase 10). Orchestriert Beitritt/Verlassen/Mute/Deafen und
- * hält das Roster (wer sitzt in welchem Sprachkanal) des ausgewählten Servers.
+ * Voice-Zustand (Phase 10/11). Orchestriert Beitritt/Verlassen/Mute/Deafen,
+ * Kamera und Bildschirmfreigabe und hält das Roster (wer sitzt in welchem
+ * Sprachkanal) des ausgewählten Servers sowie die aktiven Video-Kacheln.
  * Die eigentliche Medienlogik steckt in lib/voice.ts (VoiceClient).
  *
  * Die Voice-Verbindung ist unabhängig vom gerade angezeigten Server: man bleibt
@@ -25,11 +26,17 @@ interface VoiceStoreState {
   status: VoiceStatus;
   selfMuted: boolean;
   selfDeafened: boolean;
+  /** Eigene Kamera aktiv (Phase 11). */
+  selfCameraOn: boolean;
+  /** Eigene Bildschirmfreigabe aktiv (Phase 11). */
+  selfScreenOn: boolean;
   /** false = Zuhörer-Modus (kein Mikrofon/keine Berechtigung). */
   hasMic: boolean;
   error: string | null;
   /** Roster des ausgewählten Servers (alle seine Sprachkanäle). */
   voiceStates: VoiceState[];
+  /** Aktive Video-Streams (eigene + fremde) für die Video-Bühne. */
+  videoTiles: VideoTile[];
 
   setVoiceStates: (states: VoiceState[]) => void;
   handleVoiceStateUpdate: (d: VoiceStateUpdatePayload) => void;
@@ -37,10 +44,14 @@ interface VoiceStoreState {
   leaveVoice: () => Promise<void>;
   toggleMute: () => void;
   toggleDeafen: () => void;
+  toggleCamera: () => Promise<void>;
+  toggleScreenShare: () => Promise<void>;
   /** Vom VoiceClient bei unerwartetem Verbindungsende aufgerufen. */
   handleVoiceClosed: () => void;
   /** Nach Gateway-Reconnect: Session serverseitig neu registrieren. */
   reregisterAfterReconnect: () => Promise<void>;
+  /** Aktuellen Selbst-Zustand (Mute/Deafen/Kamera/Screen) ans Roster pushen. */
+  syncState: () => Promise<void>;
   reset: () => void;
 }
 
@@ -59,9 +70,12 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   status: 'idle',
   selfMuted: false,
   selfDeafened: false,
+  selfCameraOn: false,
+  selfScreenOn: false,
   hasMic: false,
   error: null,
   voiceStates: [],
+  videoTiles: [],
 
   setVoiceStates: (states) => set({ voiceStates: states }),
 
@@ -78,6 +92,8 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     }),
 
   joinVoice: async (channel) => {
+    const self = useAuthStore.getState().user;
+    if (!self) return;
     // Bereits in einem anderen Kanal? Erst sauber trennen (Medien + Roster).
     if (get().activeChannelId && get().activeChannelId !== channel.id) {
       await get().leaveVoice();
@@ -88,13 +104,25 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       error: null,
       selfMuted: false,
       selfDeafened: false,
+      selfCameraOn: false,
+      selfScreenOn: false,
+      videoTiles: [],
     });
 
     try {
       const res = await authFetch<VoiceJoinResponse>(`/api/voice/channels/${channel.id}/join`, {
         method: 'POST',
       });
-      client = new VoiceClient({ onClosed: () => get().handleVoiceClosed() });
+      client = new VoiceClient({
+        self: { userId: self.id, username: self.username },
+        onClosed: () => get().handleVoiceClosed(),
+        onTilesChanged: (tiles) => set({ videoTiles: tiles }),
+        onLocalVideoEnded: (source) => {
+          if (source === 'cam') set({ selfCameraOn: false });
+          else set({ selfScreenOn: false });
+          void get().syncState();
+        },
+      });
       await client.connect(res.voiceUrl, res.voiceToken);
       // Nur weitermachen, wenn der Nutzer nicht in der Zwischenzeit getrennt hat.
       if (get().activeChannelId !== channel.id) {
@@ -113,6 +141,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       set({
         status: 'error',
         activeChannelId: null,
+        videoTiles: [],
         error: err instanceof Error ? err.message : 'Verbindung fehlgeschlagen',
       });
     }
@@ -127,7 +156,10 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       status: 'idle',
       selfMuted: false,
       selfDeafened: false,
+      selfCameraOn: false,
+      selfScreenOn: false,
       hasMic: false,
+      videoTiles: [],
     });
     if (channelId) {
       await authFetch<void>(`/api/voice/channels/${channelId}/leave`, { method: 'POST' }).catch(
@@ -145,7 +177,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     set({ selfMuted: muted, selfDeafened: deafened });
     void client?.setMicPaused(muted);
     if (!deafened) client?.setDeafened(false);
-    void pushState(activeChannelId, muted, deafened);
+    void get().syncState();
   },
 
   toggleDeafen: () => {
@@ -157,7 +189,42 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     set({ selfDeafened: deafened, selfMuted: muted });
     client?.setDeafened(deafened);
     void client?.setMicPaused(muted);
-    void pushState(activeChannelId, muted, deafened);
+    void get().syncState();
+  },
+
+  toggleCamera: async () => {
+    const { activeChannelId, selfCameraOn } = get();
+    if (!activeChannelId || !client || get().status !== 'connected') return;
+    try {
+      if (selfCameraOn) {
+        await client.stopCamera();
+        set({ selfCameraOn: false });
+      } else {
+        await client.startCamera();
+        set({ selfCameraOn: true });
+      }
+      void get().syncState();
+    } catch (err) {
+      // Kamera-Fehler (verweigert/kein Gerät) – Zustand unverändert lassen.
+      set({ error: err instanceof Error ? err.message : 'Kamera nicht verfügbar' });
+    }
+  },
+
+  toggleScreenShare: async () => {
+    const { activeChannelId, selfScreenOn } = get();
+    if (!activeChannelId || !client || get().status !== 'connected') return;
+    try {
+      if (selfScreenOn) {
+        await client.stopScreenShare();
+        set({ selfScreenOn: false });
+      } else {
+        await client.startScreenShare();
+        set({ selfScreenOn: true });
+      }
+      void get().syncState();
+    } catch {
+      // Nutzer hat den Freigabe-Dialog abgebrochen o. Ä. – kein Fehler-Banner.
+    }
   },
 
   handleVoiceClosed: () => {
@@ -174,23 +241,40 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       status: 'idle',
       selfMuted: false,
       selfDeafened: false,
+      selfCameraOn: false,
+      selfScreenOn: false,
       hasMic: false,
+      videoTiles: [],
     });
   },
 
   reregisterAfterReconnect: async () => {
-    const { activeChannelId, selfMuted, selfDeafened, status } = get();
+    const { activeChannelId, selfMuted, selfDeafened, selfCameraOn, selfScreenOn, status } = get();
     if (!activeChannelId || status !== 'connected') return;
     // API kann die Session beim Neustart geleert haben → neu anlegen (Medien-WS
-    // zum SFU läuft unabhängig weiter) und den Mute-/Deafen-Zustand nachziehen.
+    // zum SFU läuft unabhängig weiter) und den vollen Zustand nachziehen.
     try {
       await authFetch<VoiceJoinResponse>(`/api/voice/channels/${activeChannelId}/join`, {
         method: 'POST',
       });
-      if (selfMuted || selfDeafened) await pushState(activeChannelId, selfMuted, selfDeafened);
+      if (selfMuted || selfDeafened || selfCameraOn || selfScreenOn) await get().syncState();
     } catch {
       /* Beim nächsten Reconnect erneut versucht. */
     }
+  },
+
+  syncState: () => {
+    const { activeChannelId, selfMuted, selfDeafened, selfCameraOn, selfScreenOn } = get();
+    if (!activeChannelId) return Promise.resolve();
+    return authFetch<void>(`/api/voice/channels/${activeChannelId}/state`, {
+      method: 'PATCH',
+      body: {
+        muted: selfMuted,
+        deafened: selfDeafened,
+        cameraOn: selfCameraOn,
+        screenOn: selfScreenOn,
+      },
+    }).catch(() => undefined);
   },
 
   reset: () => {
@@ -201,16 +285,12 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       status: 'idle',
       selfMuted: false,
       selfDeafened: false,
+      selfCameraOn: false,
+      selfScreenOn: false,
       hasMic: false,
       error: null,
       voiceStates: [],
+      videoTiles: [],
     });
   },
 }));
-
-function pushState(channelId: string, muted: boolean, deafened: boolean): Promise<void> {
-  return authFetch<void>(`/api/voice/channels/${channelId}/state`, {
-    method: 'PATCH',
-    body: { muted, deafened },
-  }).catch(() => undefined);
-}

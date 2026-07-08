@@ -6,6 +6,7 @@ import type {
   VoiceClientMessage,
   VoiceProducerInfo,
   VoiceServerMessage,
+  VoiceSource,
   VoiceTokenClaims,
 } from '@parley/shared';
 import { config } from './config';
@@ -166,9 +167,12 @@ export class SignalingServer {
       case 'produce': {
         const transport = peer.transports.get(msg.transportId);
         if (!transport) throw new Error('Transport unbekannt');
+        // Die Quelle (mic/cam/screen) am Producer festhalten, damit newProducer
+        // und getProducers sie mitliefern und Clients richtig rendern.
         const producer = await transport.produce({
           kind: msg.kind,
           rtpParameters: msg.rtpParameters as types.RtpParameters,
+          appData: { source: msg.source },
         });
         peer.producers.set(producer.id, producer);
         producer.on('transportclose', () => {
@@ -238,6 +242,22 @@ export class SignalingServer {
         return { resumed: true };
       }
 
+      case 'closeProducer': {
+        const producer = peer.producers.get(msg.producerId);
+        if (!producer) throw new Error('Producer unbekannt');
+        producer.close();
+        peer.producers.delete(msg.producerId);
+        // Consumer der anderen feuern 'producerclose' und melden es selbst; wir
+        // benachrichtigen zusätzlich explizit (idempotent auf Client-Seite),
+        // damit auch Peers ohne Consumer den Stream aus dem Roster nehmen.
+        this.notifyOthers(room, peer.id, {
+          op: 'producerClosed',
+          producerId: msg.producerId,
+          peerId: peer.id,
+        });
+        return { closed: true };
+      }
+
       case 'getProducers': {
         const producers: VoiceProducerInfo[] = room
           .otherProducers(peer.id)
@@ -286,12 +306,15 @@ export class SignalingServer {
 }
 
 function producerInfo(producer: types.Producer, owner: Peer): VoiceProducerInfo {
+  // source wurde beim produce als appData gesetzt; Fallback 'mic' für Audio.
+  const source = (producer.appData as { source?: VoiceSource }).source ?? 'mic';
   return {
     producerId: producer.id,
     peerId: owner.id,
     userId: owner.userId,
     username: owner.username,
     kind: producer.kind as 'audio' | 'video',
+    source,
   };
 }
 

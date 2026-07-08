@@ -92,12 +92,17 @@ export type VoiceClientMessage =
   | { op: 'createTransport'; rid: number; direction: 'send' | 'recv' }
   /** DTLS-Parameter nach dem lokalen Aufbau nachreichen. */
   | { op: 'connectTransport'; rid: number; transportId: string; dtlsParameters: Json }
-  /** Eigenen Audio-Track produzieren. */
+  /**
+   * Eigenen Medien-Track produzieren. `source` unterscheidet Mikrofon (audio),
+   * Kamera-Video und Bildschirmfreigabe (beide video) – wird als appData am
+   * mediasoup-Producer geführt und an die anderen Teilnehmer weitergereicht.
+   */
   | {
       op: 'produce';
       rid: number;
       transportId: string;
       kind: 'audio' | 'video';
+      source: VoiceSource;
       rtpParameters: Json;
     }
   /** Fremden Producer konsumieren. */
@@ -107,6 +112,11 @@ export type VoiceClientMessage =
   /** Eigenen Producer pausieren/fortsetzen (Mute). */
   | { op: 'pauseProducer'; rid: number; producerId: string }
   | { op: 'resumeProducer'; rid: number; producerId: string }
+  /**
+   * Eigenen Producer endgültig schließen (Kamera aus / Screen-Share beenden).
+   * Anders als pauseProducer verschwindet der Stream bei den anderen ganz.
+   */
+  | { op: 'closeProducer'; rid: number; producerId: string }
   /** Liste der bereits vorhandenen Producer (zum Konsumieren beim Beitritt). */
   | { op: 'getProducers'; rid: number };
 
@@ -117,6 +127,8 @@ export interface VoiceProducerInfo {
   userId: string;
   username: string;
   kind: 'audio' | 'video';
+  /** Mikrofon, Kamera oder Bildschirmfreigabe (bestimmt das Rendering). */
+  source: VoiceSource;
 }
 
 /** Nachrichten SFU → Client. Antworten tragen `rid`, Benachrichtigungen nicht. */

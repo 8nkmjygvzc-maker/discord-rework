@@ -203,6 +203,10 @@ model VoiceSession {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   muted     Boolean  @default(false)
   deafened  Boolean  @default(false)
+  // Phase 11: Kamera-Video / Bildschirmfreigabe aktiv (nur Roster-Anzeige – die
+  // Medien-Wahrheit liegt beim SFU). Beim (Neu-)Beitritt zurückgesetzt.
+  cameraOn  Boolean  @default(false)
+  screenOn  Boolean  @default(false)
   joinedAt  DateTime @default(now())
 
   @@index([channelId])

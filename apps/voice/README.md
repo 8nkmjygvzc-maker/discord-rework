@@ -1,8 +1,8 @@
-# @parley/voice – mediasoup-SFU (Phase 10)
+# @parley/voice – mediasoup-SFU (Phase 10/11)
 
-Selektiver Forwarding-Unit-Dienst (SFU) für Sprach- (und später Video-)Chat.
-Läuft als **eigenständiger Node-Prozess** neben der API, damit Medien separat
-skaliert werden können (CLAUDE.md §4).
+Selektiver Forwarding-Unit-Dienst (SFU) für Sprach-, Video- und
+Bildschirmfreigabe-Chat. Läuft als **eigenständiger Node-Prozess** neben der
+API, damit Medien separat skaliert werden können (CLAUDE.md §4).
 
 ## Aufgabenteilung
 
@@ -31,15 +31,16 @@ Client                         API                         SFU (dieser Dienst)
   │  { op:'welcome', peerId }                                  │
   │◀──────────────────────────────────────────────────────────│
   │  getRtpCapabilities → createTransport(send/recv)          │
-  │  → connectTransport → produce (Mikro) → consume (andere)  │
+  │  → connectTransport → produce (mic/cam/screen)            │
+  │  → consume (andere) / closeProducer (Kamera aus)          │
   │◀────────── newProducer / producerClosed / peerLeft ───────│
 ```
 
 Bei WS-Close meldet der SFU dem API-Roster den Weggang über den Redis-Kanal
 `voice:disconnect` – so bleibt der Roster auch bei Client-Abstürzen konsistent.
 
-Medien sind **transportverschlüsselt** (DTLS-SRTP zwischen Client und SFU).
-Echte Medien-E2EE (Insertable Streams) steht in der ROADMAP.
+Medien (Audio wie Video) sind **transportverschlüsselt** (DTLS-SRTP zwischen
+Client und SFU). Echte Medien-E2EE (Insertable Streams) steht in der ROADMAP.
 
 ## Architektur
 
@@ -47,9 +48,13 @@ Echte Medien-E2EE (Insertable Streams) steht in der ROADMAP.
   nötig). Für mehr Last: mehrere Worker + Router-Piping (ROADMAP).
 - **Ein Router pro Sprachkanal** (`Room`), angelegt beim ersten Beitritt,
   geschlossen wenn leer.
-- **Ein Peer pro Medien-WS** mit je einem Send- und Recv-Transport.
-- Codecs: Opus (Audio). Video/VP8 kommt in Phase 11 (in `mediasoup-manager.ts`
-  ergänzen – der Rest bleibt unverändert).
+- **Ein Peer pro Medien-WS** mit je einem Send- und Recv-Transport. Ein Peer
+  kann mehrere Producer halten: Mikrofon (audio), Kamera und Bildschirm (beide
+  video). Die Quelle reist als `appData.source` (`mic`/`cam`/`screen`) am
+  Producer mit und wird über `newProducer`/`getProducers` an die anderen
+  weitergereicht – so unterscheiden Clients Kamera von Screen-Share.
+- Codecs: Opus (Audio), VP8 und H264 (Video, Phase 11) – in
+  `mediasoup-manager.ts`.
 
 Dateien: `config.ts` (Env), `mediasoup-manager.ts` (Worker + Räume),
 `room.ts` (Room/Peer), `signaling.ts` (WS-Protokoll), `main.ts` (HTTP + Health).

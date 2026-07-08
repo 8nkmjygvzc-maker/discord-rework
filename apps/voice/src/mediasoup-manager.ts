@@ -4,8 +4,10 @@ import { config } from './config';
 import { Room } from './room';
 
 /**
- * Audio-Codecs des Routers. Für Phase 10 nur Opus; Video/VP8 kommt in Phase 11
- * (dann hier ergänzen – der Rest des SFU bleibt unverändert).
+ * Codecs des Routers. Audio = Opus (Phase 10). Video (Phase 11): VP8 und H264,
+ * damit sowohl Chrome/Firefox (VP8) als auch Safari (H264) Kamera und
+ * Bildschirmfreigabe senden können. `x-google-start-bitrate` gibt dem Encoder
+ * einen sinnvollen Startpunkt; der Rest wird pro Producer per encodings geregelt.
  */
 const MEDIA_CODECS: types.RouterRtpCodecCapability[] = [
   {
@@ -13,6 +15,23 @@ const MEDIA_CODECS: types.RouterRtpCodecCapability[] = [
     mimeType: 'audio/opus',
     clockRate: 48000,
     channels: 2,
+  },
+  {
+    kind: 'video',
+    mimeType: 'video/VP8',
+    clockRate: 90000,
+    parameters: { 'x-google-start-bitrate': 1000 },
+  },
+  {
+    kind: 'video',
+    mimeType: 'video/H264',
+    clockRate: 90000,
+    parameters: {
+      'packetization-mode': 1,
+      'profile-level-id': '42e01f',
+      'level-asymmetry-allowed': 1,
+      'x-google-start-bitrate': 1000,
+    },
   },
 ];
 

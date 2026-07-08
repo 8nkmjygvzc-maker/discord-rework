@@ -1,20 +1,43 @@
 import { Device, types } from 'mediasoup-client';
-import type { VoiceProducerInfo, VoiceServerMessage } from '@parley/shared';
+import type { VoiceProducerInfo, VoiceServerMessage, VoiceSource } from '@parley/shared';
 
 /**
- * Browser-seitige Voice-Anbindung (Phase 10). Kapselt die mediasoup-client-
- * Logik: WebSocket zum SFU, Device laden, Send-/Recv-Transporte, eigenen
- * Mikrofon-Producer und das Konsumieren der anderen Teilnehmer. Der Store
- * (store/voice.ts) orchestriert Beitritt/Verlassen/Mute; diese Klasse macht
- * ausschließlich die Medien.
+ * Browser-seitige Voice-Anbindung (Phase 10/11). Kapselt die mediasoup-client-
+ * Logik: WebSocket zum SFU, Device laden, Send-/Recv-Transporte, eigene
+ * Producer (Mikrofon, Kamera, Bildschirm) und das Konsumieren der anderen
+ * Teilnehmer. Der Store (store/voice.ts) orchestriert Beitritt/Verlassen/Mute
+ * und die Video-Umschalter; diese Klasse macht ausschließlich die Medien.
  *
  * Ohne funktionierendes Mikrofon (Berechtigung verweigert / kein Gerät) wird
- * NUR zugehört (kein Producer) – man ist trotzdem im Kanal, nur stumm.
+ * NUR zugehört (kein Mikro-Producer) – man ist trotzdem im Kanal, nur stumm.
+ * Kamera und Bildschirmfreigabe sind optional und werden erst auf Wunsch aktiv.
  */
 
+/** Ein anzuzeigender Video-Stream (eigener oder fremder) für die Video-Bühne. */
+export interface VideoTile {
+  /** Stabiler React-Key (consumerId bei fremden, 'local-cam'/'local-screen' bei eigenen). */
+  id: string;
+  userId: string;
+  username: string;
+  /** 'cam' = Kamera, 'screen' = Bildschirmfreigabe (Audio erzeugt keine Kachel). */
+  source: Exclude<VoiceSource, 'mic'>;
+  /** true = eigener Stream (wird gespiegelt/stummgeschaltet dargestellt). */
+  isLocal: boolean;
+  track: MediaStreamTrack;
+}
+
 interface VoiceCallbacks {
+  /** Der lokale Nutzer (für die Beschriftung eigener Video-Kacheln). */
+  self: { userId: string; username: string };
   /** Verbindung unerwartet geschlossen (z. B. SFU weg) → Store räumt auf. */
   onClosed: () => void;
+  /** Video-Kacheln (lokal + fremd) haben sich geändert. */
+  onTilesChanged: (tiles: VideoTile[]) => void;
+  /**
+   * Ein eigener Video-Track ist von selbst beendet worden (z. B. „Freigabe
+   * beenden“ im Browser oder Gerät entfernt) → Store aktualisiert das Roster.
+   */
+  onLocalVideoEnded: (source: 'cam' | 'screen') => void;
 }
 
 let ridSeq = 1;
@@ -26,9 +49,17 @@ export class VoiceClient {
   private recvTransport: types.Transport | null = null;
   private micProducer: types.Producer | null = null;
   private micTrack: MediaStreamTrack | null = null;
+  private camProducer: types.Producer | null = null;
+  private camTrack: MediaStreamTrack | null = null;
+  private screenProducer: types.Producer | null = null;
+  private screenTrack: MediaStreamTrack | null = null;
   private readonly consumers = new Map<string, types.Consumer>();
-  /** Ein verstecktes <audio>-Element pro Consumer (Wiedergabe der Ströme). */
+  /** Ein verstecktes <audio>-Element pro Audio-Consumer (Wiedergabe der Ströme). */
   private readonly audioEls = new Map<string, HTMLAudioElement>();
+  /** Fremde Video-Kacheln, Schlüssel = consumerId. */
+  private readonly remoteVideo = new Map<string, VideoTile>();
+  /** Metadaten der bekannten Producer (Quelle/Nutzer) – für das Konsumieren. */
+  private readonly producerMeta = new Map<string, VoiceProducerInfo>();
   private readonly pending = new Map<
     number,
     { resolve: (d: unknown) => void; reject: (e: Error) => void }
@@ -70,7 +101,7 @@ export class VoiceClient {
 
     // 5) Bereits vorhandene Producer konsumieren.
     const { producers } = (await this.rpc('getProducers')) as { producers: VoiceProducerInfo[] };
-    for (const p of producers) await this.consume(p.producerId);
+    for (const p of producers) await this.consume(p);
   }
 
   /** Mikrofon stumm/laut schalten (pausiert den Producer und meldet es dem SFU). */
@@ -87,15 +118,64 @@ export class VoiceClient {
     }
   }
 
-  /** Deafen: alle eingehenden Ströme stummschalten (lokal). */
+  /** Deafen: alle eingehenden Audio-Ströme stummschalten (lokal). */
   setDeafened(deafened: boolean): void {
     this.deafened = deafened;
     for (const el of this.audioEls.values()) el.muted = deafened;
   }
 
+  /** Kamera einschalten und als Video-Producer senden. Wirft bei Fehler. */
+  async startCamera(): Promise<void> {
+    if (this.camProducer || !this.sendTransport) return;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+    const track = stream.getVideoTracks()[0];
+    if (!track) throw new Error('Keine Kamera gefunden');
+    this.camTrack = track;
+    this.camProducer = await this.sendTransport.produce({
+      track,
+      encodings: [{ maxBitrate: 600_000 }],
+      appData: { source: 'cam' satisfies VoiceSource },
+    });
+    track.addEventListener('ended', () => this.onTrackEnded('cam'));
+    this.emitTiles();
+  }
+
+  /** Kamera ausschalten (Producer schließen, andere sehen die Kachel verschwinden). */
+  async stopCamera(): Promise<void> {
+    await this.closeLocalProducer('cam');
+    this.emitTiles();
+  }
+
+  /** Bildschirmfreigabe starten. Wirft bei Abbruch/Verweigerung durch den Nutzer. */
+  async startScreenShare(): Promise<void> {
+    if (this.screenProducer || !this.sendTransport) return;
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    const track = stream.getVideoTracks()[0];
+    if (!track) throw new Error('Keine Bildschirmquelle gewählt');
+    this.screenTrack = track;
+    this.screenProducer = await this.sendTransport.produce({
+      track,
+      encodings: [{ maxBitrate: 2_500_000 }],
+      appData: { source: 'screen' satisfies VoiceSource },
+    });
+    // Feuert beim „Freigabe beenden“-Button des Browsers → sauber aufräumen.
+    track.addEventListener('ended', () => this.onTrackEnded('screen'));
+    this.emitTiles();
+  }
+
+  /** Bildschirmfreigabe beenden. */
+  async stopScreenShare(): Promise<void> {
+    await this.closeLocalProducer('screen');
+    this.emitTiles();
+  }
+
   disconnect(): void {
     this.closed = true;
     this.micTrack?.stop();
+    this.camTrack?.stop();
+    this.screenTrack?.stop();
     this.sendTransport?.close();
     this.recvTransport?.close();
     for (const el of this.audioEls.values()) {
@@ -105,6 +185,8 @@ export class VoiceClient {
     }
     this.audioEls.clear();
     this.consumers.clear();
+    this.remoteVideo.clear();
+    this.producerMeta.clear();
     this.ws?.close();
     this.ws = null;
   }
@@ -119,8 +201,10 @@ export class VoiceClient {
         .then(() => callback())
         .catch((e: Error) => errback(e));
     });
-    transport.on('produce', ({ kind, rtpParameters }, callback, errback) => {
-      this.rpc('produce', { transportId: transport.id, kind, rtpParameters })
+    transport.on('produce', ({ kind, rtpParameters, appData }, callback, errback) => {
+      // Quelle (mic/cam/screen) aus appData an den SFU durchreichen.
+      const source = (appData as { source?: VoiceSource }).source ?? 'mic';
+      this.rpc('produce', { transportId: transport.id, kind, rtpParameters, source })
         .then((d) => callback({ id: (d as { producerId: string }).producerId }))
         .catch((e: Error) => errback(e));
     });
@@ -145,7 +229,10 @@ export class VoiceClient {
       });
       this.micTrack = stream.getAudioTracks()[0] ?? null;
       if (this.micTrack && this.sendTransport) {
-        this.micProducer = await this.sendTransport.produce({ track: this.micTrack });
+        this.micProducer = await this.sendTransport.produce({
+          track: this.micTrack,
+          appData: { source: 'mic' satisfies VoiceSource },
+        });
       }
     } catch {
       // Kein Mikrofon/keine Berechtigung → Zuhörer-Modus. Nicht fatal.
@@ -154,11 +241,41 @@ export class VoiceClient {
     }
   }
 
-  private async consume(producerId: string): Promise<void> {
+  /** Schließt einen eigenen Video-Producer serverseitig und lokal. */
+  private async closeLocalProducer(source: 'cam' | 'screen'): Promise<void> {
+    const producer = source === 'cam' ? this.camProducer : this.screenProducer;
+    const track = source === 'cam' ? this.camTrack : this.screenTrack;
+    if (source === 'cam') {
+      this.camProducer = null;
+      this.camTrack = null;
+    } else {
+      this.screenProducer = null;
+      this.screenTrack = null;
+    }
+    if (!producer) return;
+    try {
+      await this.rpc('closeProducer', { producerId: producer.id });
+    } catch {
+      /* Best-effort – lokal schließen wir ohnehin. */
+    }
+    producer.close();
+    track?.stop();
+  }
+
+  /** Ein eigener Video-Track wurde extern beendet (Freigabe-Stopp / Gerät weg). */
+  private onTrackEnded(source: 'cam' | 'screen'): void {
+    void this.closeLocalProducer(source).finally(() => {
+      this.emitTiles();
+      this.cb.onLocalVideoEnded(source);
+    });
+  }
+
+  private async consume(info: VoiceProducerInfo): Promise<void> {
     if (!this.recvTransport || !this.device) return;
+    this.producerMeta.set(info.producerId, info);
     try {
       const data = (await this.rpc('consume', {
-        producerId,
+        producerId: info.producerId,
         rtpCapabilities: this.device.rtpCapabilities,
       })) as {
         id: string;
@@ -173,14 +290,26 @@ export class VoiceClient {
         rtpParameters: data.rtpParameters,
       });
       this.consumers.set(consumer.id, consumer);
-      this.playTrack(consumer.id, consumer.track);
+      if (consumer.kind === 'video') {
+        this.remoteVideo.set(consumer.id, {
+          id: consumer.id,
+          userId: info.userId,
+          username: info.username,
+          source: info.source === 'screen' ? 'screen' : 'cam',
+          isLocal: false,
+          track: consumer.track,
+        });
+        this.emitTiles();
+      } else {
+        this.playAudio(consumer.id, consumer.track);
+      }
       await this.rpc('resumeConsumer', { consumerId: consumer.id });
     } catch {
       /* Producer evtl. schon wieder weg – ignorieren. */
     }
   }
 
-  private playTrack(consumerId: string, track: MediaStreamTrack): void {
+  private playAudio(consumerId: string, track: MediaStreamTrack): void {
     const el = document.createElement('audio');
     el.autoplay = true;
     el.muted = this.deafened;
@@ -194,6 +323,8 @@ export class VoiceClient {
   }
 
   private closeConsumerByProducer(producerId: string): void {
+    this.producerMeta.delete(producerId);
+    let videoChanged = false;
     for (const [id, consumer] of this.consumers) {
       if (consumer.producerId !== producerId) continue;
       consumer.close();
@@ -205,7 +336,36 @@ export class VoiceClient {
         el.remove();
         this.audioEls.delete(id);
       }
+      if (this.remoteVideo.delete(id)) videoChanged = true;
     }
+    if (videoChanged) this.emitTiles();
+  }
+
+  /** Baut die aktuelle Kachel-Liste (eigene + fremde Video-Streams) und meldet sie. */
+  private emitTiles(): void {
+    const tiles: VideoTile[] = [];
+    if (this.camTrack) {
+      tiles.push({
+        id: 'local-cam',
+        userId: this.cb.self.userId,
+        username: this.cb.self.username,
+        source: 'cam',
+        isLocal: true,
+        track: this.camTrack,
+      });
+    }
+    if (this.screenTrack) {
+      tiles.push({
+        id: 'local-screen',
+        userId: this.cb.self.userId,
+        username: this.cb.self.username,
+        source: 'screen',
+        isLocal: true,
+        track: this.screenTrack,
+      });
+    }
+    for (const tile of this.remoteVideo.values()) tiles.push(tile);
+    this.cb.onTilesChanged(tiles);
   }
 
   private onMessage(raw: string): void {
@@ -225,7 +385,7 @@ export class VoiceClient {
         this.pending.delete(msg.rid);
         return;
       case 'newProducer':
-        void this.consume(msg.producer.producerId);
+        void this.consume(msg.producer);
         return;
       case 'producerClosed':
         this.closeConsumerByProducer(msg.producerId);

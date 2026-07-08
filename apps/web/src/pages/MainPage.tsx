@@ -6,6 +6,7 @@ import ServerRail from '../components/ServerRail';
 import ChannelSidebar from '../components/ChannelSidebar';
 import MembersPanel from '../components/MembersPanel';
 import ChatView from '../components/ChatView';
+import VoiceStage from '../components/VoiceStage';
 import HomeView from '../components/HomeView';
 import RolesDialog from '../components/RolesDialog';
 import Modal from '../components/Modal';
@@ -72,13 +73,16 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
             onOpenRoles={() => setDialog('roles')}
           />
 
-          {channel ? (
-            <ChatView channel={channel} />
-          ) : (
-            <main className="flex min-w-0 flex-1 items-center justify-center text-zinc-500">
-              Wähle einen Kanal
-            </main>
-          )}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <VoiceStage />
+            {channel ? (
+              <ChatView channel={channel} />
+            ) : (
+              <main className="flex flex-1 items-center justify-center text-zinc-500">
+                Wähle einen Kanal
+              </main>
+            )}
+          </div>
 
           <MembersPanel />
         </>

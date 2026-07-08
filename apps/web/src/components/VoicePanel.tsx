@@ -11,10 +11,14 @@ export default function VoicePanel() {
   const activeChannelId = useVoiceStore((s) => s.activeChannelId);
   const selfMuted = useVoiceStore((s) => s.selfMuted);
   const selfDeafened = useVoiceStore((s) => s.selfDeafened);
+  const selfCameraOn = useVoiceStore((s) => s.selfCameraOn);
+  const selfScreenOn = useVoiceStore((s) => s.selfScreenOn);
   const hasMic = useVoiceStore((s) => s.hasMic);
   const error = useVoiceStore((s) => s.error);
   const toggleMute = useVoiceStore((s) => s.toggleMute);
   const toggleDeafen = useVoiceStore((s) => s.toggleDeafen);
+  const toggleCamera = useVoiceStore((s) => s.toggleCamera);
+  const toggleScreenShare = useVoiceStore((s) => s.toggleScreenShare);
   const leaveVoice = useVoiceStore((s) => s.leaveVoice);
 
   // Kanalnamen aus dem gerade gewählten Server ableiten (best effort – bei
@@ -84,6 +88,35 @@ export default function VoicePanel() {
           } disabled:cursor-not-allowed disabled:opacity-60`}
         >
           {selfDeafened ? '🔕 Taub' : '🎧 Ton'}
+        </button>
+      </div>
+
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          disabled={connecting}
+          title={selfCameraOn ? 'Kamera ausschalten' : 'Kamera einschalten'}
+          onClick={() => void toggleCamera()}
+          className={`flex-1 rounded px-2 py-1 text-xs font-medium ${
+            selfCameraOn
+              ? 'bg-emerald-800/70 text-emerald-200'
+              : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+          } disabled:cursor-not-allowed disabled:opacity-60`}
+        >
+          {selfCameraOn ? '📹 Kamera an' : '📷 Kamera'}
+        </button>
+        <button
+          type="button"
+          disabled={connecting}
+          title={selfScreenOn ? 'Freigabe beenden' : 'Bildschirm teilen'}
+          onClick={() => void toggleScreenShare()}
+          className={`flex-1 rounded px-2 py-1 text-xs font-medium ${
+            selfScreenOn
+              ? 'bg-emerald-800/70 text-emerald-200'
+              : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+          } disabled:cursor-not-allowed disabled:opacity-60`}
+        >
+          {selfScreenOn ? '🖥️ Teilt' : '🖥️ Teilen'}
         </button>
       </div>
     </div>
