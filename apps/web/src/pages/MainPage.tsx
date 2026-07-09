@@ -68,7 +68,7 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
   const showHome = home || (loaded && servers.length === 0);
 
   return (
-    <div className="flex h-screen bg-zinc-800 text-zinc-100">
+    <div className="flex h-screen overflow-hidden bg-zinc-800 text-zinc-100">
       <ServerRail
         homeActive={showHome}
         onSelectHome={() => setHome(true)}
@@ -94,7 +94,7 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
             onOpenInvite={() => setDialog('invite')}
           />
 
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <VoiceStage />
             {channel ? (
               <ChatView channel={channel} />

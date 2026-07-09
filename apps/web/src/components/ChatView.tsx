@@ -322,7 +322,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     !dm && hasPermission(permissionsFromString(myPermissions), Permissions.ManageMessages);
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
         <span className="text-zinc-500">{dm ? '@' : '#'}</span>
         <span className="font-semibold">{channel.name}</span>
@@ -397,7 +397,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto px-4 py-3"
+        className="chat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3"
         data-testid="message-list"
       >
         {chan?.hasMore && !threadRootId && (
@@ -457,7 +457,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
         </ul>
       </div>
 
-      <form onSubmit={onSubmit} className="px-4 pb-4">
+      <form onSubmit={onSubmit} className="shrink-0 px-4 pb-4">
         {error && (
           <p className="mb-2 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-400">
             {error}
