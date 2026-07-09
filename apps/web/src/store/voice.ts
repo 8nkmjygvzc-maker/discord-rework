@@ -6,7 +6,9 @@ import type {
   VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
-import { VoiceClient, type VideoTile } from '../lib/voice';
+// Nur Typen statisch – der VoiceClient (und damit mediasoup-client, ~700 KB) wird
+// erst beim ersten Beitritt dynamisch geladen (Code-Splitting, Phase 15).
+import type { VoiceClient, VideoTile } from '../lib/voice';
 
 /**
  * Voice-Zustand (Phase 10/11). Orchestriert Beitritt/Verlassen/Mute/Deafen,
@@ -110,9 +112,14 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     });
 
     try {
+      // Voice-Modul (mediasoup-client) parallel zum Join-Request nachladen –
+      // Rollup legt es dank ausschließlich dynamischem Import in einen eigenen
+      // Chunk, der erst hier geladen wird (Code-Splitting, Phase 15).
+      const voiceModule = import('../lib/voice');
       const res = await authFetch<VoiceJoinResponse>(`/api/voice/channels/${channel.id}/join`, {
         method: 'POST',
       });
+      const { VoiceClient } = await voiceModule;
       client = new VoiceClient({
         self: { userId: self.id, username: self.username },
         onClosed: () => get().handleVoiceClosed(),

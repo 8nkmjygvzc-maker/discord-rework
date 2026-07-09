@@ -2,7 +2,7 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 14 abgeschlossen (09.07.2026)
+## Status: Phase 14 abgeschlossen · Phase 15 (Feinschliff) begonnen (09.07.2026)
 
 ## Erledigt
 
@@ -199,9 +199,15 @@ Wie Phase 5–9/12 kam die Implementierung als angelieferter Commit (`5454690`, 
 
 **Verifiziert:** Skript mit **19 Checks, alle grün** (echtes Redis + echter SFU + echte API/DB, alle Dienste vom Skript selbst gestartet/gestoppt). [A] echter `PresenceService.filterOnline`: leere Eingabe → [], nur Online-Kandidaten zurück (Offline/Nie-Registrierte nicht), Username mitgeliefert, dedupliziert, Hash-Leiche wird NICHT zurückgegeben UND aus `presence:users` entfernt, nach `markOffline` weg. [B] echter SFU mit gefälschtem gültigem Voice-Token: Welcome nach auth, `voice:peer:{user}` mit Wert=channelId und TTL ≤ 30 gesetzt, nach 12 s durch den Heartbeat wieder auf ≥ 22 erneuert, nach WS-Trennung noch da (läuft per TTL ab statt sofort als Zombie). [C] echte API: drei seed-Sessions in einem VOICE-Kanal – verwaiste alte (kein Key) wird vom **Boot-Reconcile entfernt**, frische (Karenz) und lebende alte (Key gesetzt) bleiben; Reconcile-Logzeile bestätigt. Build (4 Workspaces)/Tests (11 API + 21 shared)/Lint/Format grün.
 
+### Phase 15 – Feinschliff (in Arbeit, 09.07.2026)
+
+Selbst gebaut, inkrementell (kleine verifizierte Schritte). Erledigt bisher:
+
+- **Performance – Code-Splitting des Voice-Bundles:** `store/voice.ts` importiert `VoiceClient`/`VideoTile` nur noch als Typ und lädt das Voice-Modul per dynamischem `import('../lib/voice')` erst beim ersten Sprachkanal-Beitritt (parallel zum Join-Request). Rollup zieht mediasoup-client dadurch in einen eigenen Chunk – das **Initial-Bundle sank von 975 KB auf 736 KB (gzip 285 → 242 KB)**, der Voice-Chunk (239 KB / 43 KB gzip) lädt nur bei Bedarf. **Verifiziert im Browser** (api+voice+web live, echter SFU): vor Beitritt ist weder `lib/voice` noch `mediasoup-client` geladen; Klick auf einen Sprachkanal lädt beide nach, Voice verbindet („Sprache verbunden", Self im Roster, Zuhörer-Modus headless), Konsole sauber. Build/Tests (11 API + 21 shared)/Lint/Format grün
+
 ## Nächste Phase
 
-**Phase 15 – Feinschliff:** Fehlerbehandlung/Edge-Cases, Onboarding-UI, Performance-Politur (u. a. Code-Splitting des mediasoup-client-Bundles, ~950 KB), `ROADMAP.md` finalisieren. Aus der ROADMAP zusätzlich als Feinschliff vorgemerkt: aktiver-Sprecher-/Sprech-Indikator, Video-Bühnen-Layout (Screen groß vs. Kameras klein), DM-Ungelesen-Badge, generische Erwähnungs-Notification für nicht-ausgewählte Server, Zitat-Original-Nachladen, Rollenfarben im Chat. Größere zurückgestellte Skalierungs-/Infra-Themen (Lasttests, presigned Uploads, Message-Queue, Multi-Device) bleiben bewusst außerhalb von Phase 15 in der ROADMAP.
+**Phase 15 – verbleibende Feinschliff-Punkte** (in kleinen verifizierten Schritten): Fehlerbehandlung/Edge-Cases, Onboarding-UI, `ROADMAP.md` finalisieren. Aus der ROADMAP als Feinschliff vorgemerkt: client-seitiger Timer, der den ⏳-Auszeit-Indikator beim Ablauf entfernt (statt erst beim Reload); aktiver-Sprecher-/Sprech-Indikator; Video-Bühnen-Layout (Screen groß vs. Kameras klein); DM-Ungelesen-Badge; generische Erwähnungs-Notification für nicht-ausgewählte Server; Zitat-Original-Nachladen; Rollenfarben im Chat. Größere zurückgestellte Skalierungs-/Infra-Themen (Lasttests, presigned Uploads, Message-Queue, Multi-Device) bleiben bewusst außerhalb von Phase 15 in der ROADMAP.
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 
