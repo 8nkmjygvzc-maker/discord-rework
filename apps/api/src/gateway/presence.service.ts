@@ -56,54 +56,42 @@ export class PresenceService {
   }
 
   /**
-   * Skalierungs-freundliche Variante (Phase 14): prüft NUR die übergebenen
+   * Skalierungs-freundliche Momentaufnahme (Phase 14): prüft NUR die übergebenen
    * Kandidaten-IDs gegen den lebenden Verbindungszähler – O(Kandidaten) statt
    * O(alle Online-Nutzer). Genutzt für den READY-Snapshot und Presence-Nachschub,
    * die ohnehin auf den Sichtbarkeitskreis (Freunde/Server/DMs) beschränkt sind.
+   *
+   * Räumt dabei Leichen im Presence-Hash im geprüften Kreis lazy auf (Eintrag
+   * ohne lebenden Zähler – entsteht, wenn eine Instanz abstürzt und nur die TTL
+   * den Zähler entfernt hat). Das war früher Aufgabe von `getOnlineUsers()`, das
+   * mit Phase 14 wegfällt, weil kein Codepfad mehr ALLE Online-Nutzer lädt.
    */
   async filterOnline(candidateIds: string[]): Promise<PresenceUser[]> {
     const unique = [...new Set(candidateIds)];
     if (unique.length === 0) return [];
 
+    // Lebenden Verbindungszähler jedes Kandidaten prüfen (eine Pipeline).
     const pipeline = this.redis.client.pipeline();
     for (const id of unique) pipeline.exists(CONN_KEY_PREFIX + id);
-    const results = (await pipeline.exec()) ?? [];
-    const onlineIds = unique.filter((_, i) => results[i]?.[1] === 1);
-    if (onlineIds.length === 0) return [];
+    const existsResults = (await pipeline.exec()) ?? [];
 
-    // Benutzernamen der Online-Kandidaten in einem Rutsch (HMGET).
-    const usernames = (await this.redis.client.hmget(USERS_HASH_KEY, ...onlineIds)) as (
-      | string
-      | null
+    // Benutzernamen aller Kandidaten in einem Rutsch (HMGET). Über alle – nicht
+    // nur die Online-Treffer – abfragen, damit Hash-Leichen im Kreis auffallen.
+    const usernames = (await this.redis.client.hmget(USERS_HASH_KEY, ...unique)) as (
+      string | null
     )[];
-    const online: PresenceUser[] = [];
-    onlineIds.forEach((id, i) => {
-      const username = usernames[i];
-      if (username) online.push({ id, username });
-    });
-    return online;
-  }
-
-  /**
-   * Momentaufnahme ALLER Online-Nutzer. Prüft jeden Hash-Eintrag gegen den
-   * lebenden Verbindungszähler und räumt Leichen auf (entstehen, wenn eine
-   * Instanz abstürzt und nur die TTL den Zähler entfernt hat). Skaliert linear
-   * mit der Gesamtzahl Online-Nutzer – für gezielte Abfragen `filterOnline`.
-   */
-  async getOnlineUsers(): Promise<PresenceUser[]> {
-    const entries = await this.redis.client.hgetall(USERS_HASH_KEY);
-    const ids = Object.keys(entries);
-    if (ids.length === 0) return [];
-
-    const pipeline = this.redis.client.pipeline();
-    for (const id of ids) pipeline.exists(CONN_KEY_PREFIX + id);
-    const results = (await pipeline.exec()) ?? [];
 
     const online: PresenceUser[] = [];
     const stale: string[] = [];
-    ids.forEach((id, i) => {
-      if (results[i]?.[1] === 1) online.push({ id, username: entries[id] });
-      else stale.push(id);
+    unique.forEach((id, i) => {
+      const isOnline = existsResults[i]?.[1] === 1;
+      const username = usernames[i];
+      if (isOnline) {
+        if (username) online.push({ id, username });
+      } else if (username !== null) {
+        // Hash-Eintrag ohne lebenden Zähler → Leiche, aufräumen.
+        stale.push(id);
+      }
     });
     if (stale.length > 0) await this.redis.client.hdel(USERS_HASH_KEY, ...stale);
     return online;

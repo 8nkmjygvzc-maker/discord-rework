@@ -96,10 +96,8 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
    */
   private async reconcileRoster(): Promise<void> {
     const sessions = await this.prisma.voiceSession.findMany({
-      include: {
-        user: { select: { username: true } },
-        channel: { select: { serverId: true } },
-      },
+      // Nur der Username wird gebraucht; removeSession löst die serverId selbst auf.
+      include: { user: { select: { username: true } } },
     });
     if (sessions.length === 0) return;
 

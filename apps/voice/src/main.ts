@@ -24,14 +24,26 @@ async function bootstrap(): Promise<void> {
 
   const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 3 });
 
+  // Fire-and-forget-Redis-Schreibvorgänge: .catch, damit ein Redis-Aussetzer
+  // (nach maxRetriesPerRequest) keine unbehandelte Promise-Rejection wirft und
+  // den SFU beendet. Der Liveness-Key läuft im schlimmsten Fall per TTL ab und
+  // der API-Reconcile räumt die Session – kein Datenverlust.
   const markPeerAlive = (userId: string, channelId: string): void => {
-    void redis.set(VOICE_PEER_KEY_PREFIX + userId, channelId, 'EX', VOICE_PEER_TTL_S);
+    redis
+      .set(VOICE_PEER_KEY_PREFIX + userId, channelId, 'EX', VOICE_PEER_TTL_S)
+      .catch((err: unknown) =>
+        console.warn(`Liveness-Key setzen fehlgeschlagen (${userId}): ${String(err)}`),
+      );
   };
 
   const signaling = new SignalingServer(
     mediasoup,
     (userId, channelId) => {
-      void redis.publish(VOICE_DISCONNECT_CHANNEL, JSON.stringify({ userId, channelId }));
+      redis
+        .publish(VOICE_DISCONNECT_CHANNEL, JSON.stringify({ userId, channelId }))
+        .catch((err: unknown) =>
+          console.warn(`voice:disconnect publizieren fehlgeschlagen (${userId}): ${String(err)}`),
+        );
     },
     markPeerAlive,
   );
