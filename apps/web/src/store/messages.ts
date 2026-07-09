@@ -15,7 +15,7 @@ import { dmMemberIds, useDmsStore } from './dms';
 import { e2ee } from '../lib/e2ee';
 import { collectAttachmentIds, uploadAttachment } from '../lib/attachments';
 import { mentionsUser } from '../lib/mentions';
-import { notifyMention } from '../lib/notifications';
+import { notifyMention, recallChannelLabel } from '../lib/notifications';
 
 interface ChannelMessages {
   messages: MessageInfo[];
@@ -296,9 +296,20 @@ type Set = (fn: (s: MessagesState) => Partial<MessagesState>) => void;
 type Get = () => MessagesState;
 
 /**
+ * Live empfangene, aber (noch) nicht entschlüsselbare Nachrichten (Phase 15):
+ * Nachricht und Sender-Key-Umschlag treffen praktisch gleichzeitig ein, die
+ * Live-Entschlüsselung verliert das Rennen. Gelingt sie später über
+ * retryUndecrypted (live=false), sollen die Live-Effekte – DM-Ungelesen-Zähler
+ * und Erwähnungs-Benachrichtigung – trotzdem laufen. Der Deckel schützt vor
+ * unbegrenztem Wachstum durch nie entschlüsselbare Events.
+ */
+const pendingLiveIds = new Set<string>();
+const PENDING_LIVE_LIMIT = 500;
+
+/**
  * Entschlüsselt fehlende Nachrichten und trägt Ergebnisse gesammelt ein.
- * `live` = frisch über das Gateway angekommen (nicht History): nur dann wird
- * auf @Erwähnungen geprüft und ggf. eine Browser-Benachrichtigung gezeigt.
+ * `live` = frisch über das Gateway angekommen (nicht History): nur solche
+ * Nachrichten (bzw. ihre Nachzügler, s. o.) lösen Live-Effekte aus.
  */
 async function decryptBatch(
   messages: MessageInfo[],
@@ -307,10 +318,23 @@ async function decryptBatch(
   live: boolean,
 ): Promise<void> {
   const results: { message: MessageInfo; content: DecodedMessageContent }[] = [];
+  const liveResults: { message: MessageInfo; content: DecodedMessageContent }[] = [];
   for (const message of messages) {
     if (get().decrypted[message.id] !== undefined) continue;
     const plaintext = await e2ee.decryptMessage(message);
-    if (plaintext !== null) results.push({ message, content: decodeMessageContent(plaintext) });
+    if (plaintext === null) {
+      if (live) {
+        pendingLiveIds.add(message.id);
+        if (pendingLiveIds.size > PENDING_LIVE_LIMIT) {
+          const oldest = pendingLiveIds.values().next().value;
+          if (oldest !== undefined) pendingLiveIds.delete(oldest);
+        }
+      }
+      continue;
+    }
+    const content = decodeMessageContent(plaintext);
+    results.push({ message, content });
+    if (live || pendingLiveIds.delete(message.id)) liveResults.push({ message, content });
   }
   if (results.length === 0) return;
 
@@ -322,13 +346,15 @@ async function decryptBatch(
     reactions: foldReactions(s.reactions, results),
   }));
 
-  if (live) {
-    const me = useAuthStore.getState().user;
-    for (const { message, content } of results) {
-      if (!me || message.senderId === me.id || content.reaction) continue;
-      if (mentionsUser(content.text, me.username)) {
-        notifyMention(message.senderUsername, channelLabel(message.channelId), content.text);
-      }
+  const me = useAuthStore.getState().user;
+  for (const { message, content } of liveResults) {
+    if (!me || message.senderId === me.id || content.reaction) continue;
+    // DM-Ungelesen-Badge (Phase 15): erst NACH dem Entschlüsseln zählen,
+    // damit Reaktions-Events den Zähler nicht fälschlich erhöhen. Der Store
+    // ignoriert Kanäle, die keine DMs sind oder gerade sichtbar sind.
+    useDmsStore.getState().markUnread(message.channelId);
+    if (mentionsUser(content.text, me.username)) {
+      notifyMention(message.senderUsername, channelLabel(message.channelId), content.text);
     }
   }
 }
@@ -377,5 +403,6 @@ function channelLabel(channelId: string): string {
   if (channel) return `#${channel.name}`;
   const dm = useDmsStore.getState().channels.find((c) => c.id === channelId);
   if (dm) return `@${dm.otherUser.username}`;
-  return 'einem Kanal';
+  // Nicht ausgewählter Server: Label aus dem MESSAGE_CREATE-Kontext (Phase 15).
+  return recallChannelLabel(channelId) ?? 'einem Kanal';
 }

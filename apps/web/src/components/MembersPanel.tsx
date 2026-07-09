@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   hasPermission,
   Permissions,
@@ -11,6 +11,7 @@ import { usePresenceStore } from '../store/presence';
 import { useAuthStore } from '../store/auth';
 import { useVoiceStore } from '../store/voice';
 import { ApiError } from '../lib/api';
+import { memberRoleColor } from '../lib/roleColors';
 import ModerationDialog from './ModerationDialog';
 
 /** Auswahl-Dauern für die Auszeit (Timeout), 60 s … 1 Woche. */
@@ -51,6 +52,29 @@ export default function MembersPanel() {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modOpen, setModOpen] = useState(false);
+
+  // ⏳ läuft live ab (Phase 15): beim frühesten Auszeit-Ende neu rendern,
+  // statt bis zum nächsten ServerDetails-Reload zu warten. `tick` sorgt dafür,
+  // dass nach einem Ablauf der jeweils nächste Termin neu berechnet wird.
+  const [timeoutTick, setTimeoutTick] = useState(0);
+  const serverMembers = server?.members;
+  const nextTimeoutExpiry = useMemo(() => {
+    let next = Number.POSITIVE_INFINITY;
+    const now = Date.now();
+    for (const member of serverMembers ?? []) {
+      if (!member.timeoutUntil) continue;
+      const at = new Date(member.timeoutUntil).getTime();
+      if (at > now && at < next) next = at;
+    }
+    return next;
+    // timeoutTick erzwingt die Neuberechnung nach jedem abgelaufenen Termin.
+  }, [serverMembers, timeoutTick]);
+  useEffect(() => {
+    if (!Number.isFinite(nextTimeoutExpiry)) return;
+    const delay = Math.min(Math.max(nextTimeoutExpiry - Date.now(), 0) + 500, 2 ** 31 - 1);
+    const timer = window.setTimeout(() => setTimeoutTick((n) => n + 1), delay);
+    return () => window.clearTimeout(timer);
+  }, [nextTimeoutExpiry]);
 
   if (!server) return null;
   const onlineIds = new Set(onlineUsers.map((u) => u.id));
@@ -115,6 +139,7 @@ export default function MembersPanel() {
           const canModerateTarget =
             !isSelf && !isOwnerMember && myRank > rankOf(server, member.userId);
           const showMenu = canModerateTarget && (canKick || canBan || canMod);
+          const nameColor = memberRoleColor(server.roles, member.roleIds);
 
           return (
             <li key={member.userId} className={online ? '' : 'opacity-50'}>
@@ -129,7 +154,10 @@ export default function MembersPanel() {
                     }`}
                   />
                 </div>
-                <span className="truncate text-sm text-zinc-300">
+                <span
+                  className="truncate text-sm text-zinc-300"
+                  style={nameColor ? { color: nameColor } : undefined}
+                >
                   {member.nickname ?? member.username}
                 </span>
                 {timedOut && (

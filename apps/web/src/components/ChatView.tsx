@@ -10,7 +10,9 @@ import {
 import { useMessagesStore } from '../store/messages';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
+import { useDmsStore } from '../store/dms';
 import { formatBytes, MAX_FILES_PER_MESSAGE } from '../lib/attachments';
+import { memberRoleColor } from '../lib/roleColors';
 import {
   MentionPermission,
   mentionPermission,
@@ -26,11 +28,22 @@ interface ChatViewProps {
   dm?: boolean;
 }
 
+/** Deckel fürs Zitat-Nachladen (Phase 15): höchstens 10 Seiten à 50 Nachrichten. */
+const MAX_JUMP_PAGES = 10;
+
+/** Wartet zwei Frames – bis React nachgeladene Nachrichten gerendert hat. */
+function nextRender(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
 /** Nachrichtenliste + Eingabezeile für den ausgewählten Text- oder DM-Kanal. */
 export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const user = useAuthStore((s) => s.user);
   const myPermissions = useServersStore((s) => s.selectedServer?.myPermissions ?? '0');
   const members = useServersStore((s) => s.selectedServer?.members);
+  const roles = useServersStore((s) => s.selectedServer?.roles);
   const chan = useMessagesStore((s) => s.byChannel[channel.id]);
   const decrypted = useMessagesStore((s) => s.decrypted);
   const reactions = useMessagesStore((s) => s.reactions);
@@ -54,6 +67,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const stickToBottom = useRef(true);
+  const jumpBusy = useRef(false);
 
   const messages = chan?.messages ?? [];
 
@@ -62,6 +76,17 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     if (dm) return user ? [channel.name, user.username] : [channel.name];
     return members?.map((m) => m.username) ?? [];
   }, [dm, channel.name, members, user]);
+
+  /** Rollenfarbe je Absender (höchste Rolle mit Farbe, Phase 15). */
+  const senderColors = useMemo(() => {
+    const map = new Map<string, string>();
+    if (dm || !members || !roles) return map;
+    for (const member of members) {
+      const color = memberRoleColor(roles, member.roleIds);
+      if (color) map.set(member.userId, color);
+    }
+    return map;
+  }, [dm, members, roles]);
 
   // Reaktions-Events sind „Nachrichten“, gehören aber nicht in den Verlauf.
   const conversation = useMemo(
@@ -138,6 +163,14 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     setSearchQuery('');
   }, [channel.id]);
 
+  // Sichtbare DM melden (Phase 15): löscht den Ungelesen-Zähler des Kanals
+  // und verhindert, dass live eintreffende Nachrichten ihn wieder erhöhen.
+  useEffect(() => {
+    if (!dm) return;
+    useDmsStore.getState().setActiveDm(channel.id);
+    return () => useDmsStore.getState().setActiveDm(null);
+  }, [dm, channel.id]);
+
   // Auto-Scroll ans Ende, solange der Nutzer nicht bewusst hochgescrollt hat.
   useEffect(() => {
     const el = scrollRef.current;
@@ -177,11 +210,11 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     });
   }
 
-  function jumpTo(messageId: string) {
+  function scrollToMessage(messageId: string): boolean {
     // CSS.escape: Die ID stammt aus dem (absenderkontrollierten) replyTo –
     // ohne Escaping würde z. B. ein `"]` den Selektor-Parser werfen lassen.
     const el = scrollRef.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
-    if (!el) return; // Original (noch) nicht geladen – bewusst kein Auto-Nachladen in v1
+    if (!el) return false;
     stickToBottom.current = false;
     el.scrollIntoView({ block: 'center' });
     setFlashId(messageId);
@@ -189,6 +222,35 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
       () => setFlashId((current) => (current === messageId ? null : current)),
       1500,
     );
+    return true;
+  }
+
+  /** „Zum Original springen“ – lädt seit Phase 15 bei Bedarf History nach. */
+  async function jumpTo(messageId: string) {
+    if (scrollToMessage(messageId)) return;
+    if (jumpBusy.current) return;
+    jumpBusy.current = true;
+    try {
+      // Ältere Seiten laden, bis die Nachricht da ist – mit Deckel, damit ein
+      // Klick auf ein uraltes (oder gefälschtes) Zitat nicht den kompletten
+      // Verlauf durchlädt.
+      for (let page = 0; page < MAX_JUMP_PAGES; page++) {
+        const state = useMessagesStore.getState().byChannel[channel.id];
+        if (!state?.hasMore || state.messages.some((m) => m.id === messageId)) break;
+        await loadOlder(channel.id);
+      }
+      await nextRender();
+      if (scrollToMessage(messageId)) return;
+      const state = useMessagesStore.getState().byChannel[channel.id];
+      if (state?.messages.some((m) => m.id === messageId)) return; // geladen, aber gerade ausgefiltert (Suche/Thread)
+      setError(
+        state?.hasMore
+          ? `Originalnachricht nicht in den letzten ${MAX_JUMP_PAGES * 50} Nachrichten gefunden`
+          : 'Originalnachricht nicht gefunden – vermutlich wurde sie gelöscht',
+      );
+    } finally {
+      jumpBusy.current = false;
+    }
   }
 
   function toggleReaction(messageId: string, emoji: string, mine: boolean) {
@@ -382,10 +444,11 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
                 canManageMessages={canManageMessages}
                 hasThread={childrenByParent.has(msg.id) || !!content?.replyTo}
                 flash={flashId === msg.id}
+                senderColor={senderColors.get(msg.senderId) ?? null}
                 onToggleReaction={(emoji, mine) => toggleReaction(msg.id, emoji, mine)}
                 onReply={() => startReply(msg.id)}
                 onOpenThread={() => setThreadRootId(msg.id)}
-                onJumpTo={jumpTo}
+                onJumpTo={(id) => void jumpTo(id)}
                 onEdit={(newText) => handleEdit(msg.id, newText)}
                 onDelete={() => handleDelete(msg.id)}
               />

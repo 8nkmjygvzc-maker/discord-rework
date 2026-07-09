@@ -15,6 +15,7 @@ export default function HomeView({ onOpenProfile }: HomeViewProps) {
   const channels = useDmsStore((s) => s.channels);
   const selectedDmId = useDmsStore((s) => s.selectedDmId);
   const selectDm = useDmsStore((s) => s.selectDm);
+  const unread = useDmsStore((s) => s.unread);
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
 
   const onlineIds = new Set(onlineUsers.map((u) => u.id));
@@ -72,6 +73,15 @@ export default function HomeView({ onOpenProfile }: HomeViewProps) {
                     />
                   </span>
                   <span className="truncate">{dm.otherUser.username}</span>
+                  {(unread[dm.id] ?? 0) > 0 && (
+                    <span
+                      title={`${unread[dm.id]} ungelesene Nachricht(en)`}
+                      data-testid="dm-unread-badge"
+                      className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white"
+                    >
+                      {unread[dm.id] > 9 ? '9+' : unread[dm.id]}
+                    </span>
+                  )}
                 </button>
               </li>
             ))}

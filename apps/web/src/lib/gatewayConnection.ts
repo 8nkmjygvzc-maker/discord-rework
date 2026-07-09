@@ -1,6 +1,7 @@
 import type {
   DmChannelInfo,
   KeyEnvelopeInfo,
+  MessageCreatePayload,
   MessageDeletePayload,
   MessageInfo,
   PresenceSyncPayload,
@@ -12,6 +13,7 @@ import type {
 import { GatewayClient } from './gateway';
 import { e2ee } from './e2ee';
 import { resetAttachmentCache } from './attachments';
+import { rememberChannelLabel, resetChannelLabels } from './notifications';
 import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { useServersStore } from '../store/servers';
@@ -56,9 +58,19 @@ const client = new GatewayClient({
       case 'VOICE_STATE_UPDATE':
         useVoiceStore.getState().handleVoiceStateUpdate(d as VoiceStateUpdatePayload);
         return;
-      case 'MESSAGE_CREATE':
-        useMessagesStore.getState().handleMessageCreate((d as { message: MessageInfo }).message);
+      case 'MESSAGE_CREATE': {
+        const { message, context } = d as MessageCreatePayload;
+        // Kanal-Label für Benachrichtigungen merken (Phase 15) – nötig für
+        // Kanäle von Servern, die gerade nicht ausgewählt sind.
+        if (context) {
+          rememberChannelLabel(
+            message.channelId,
+            `#${context.channelName} (${context.serverName})`,
+          );
+        }
+        useMessagesStore.getState().handleMessageCreate(message);
         return;
+      }
       case 'MESSAGE_UPDATE':
         useMessagesStore.getState().handleMessageUpdate((d as { message: MessageInfo }).message);
         return;
@@ -117,6 +129,7 @@ export const gateway = {
     client.stop();
     e2ee.reset();
     resetAttachmentCache();
+    resetChannelLabels();
     usePresenceStore.getState().handleDisconnected();
     useServersStore.getState().reset();
     useMessagesStore.getState().reset();

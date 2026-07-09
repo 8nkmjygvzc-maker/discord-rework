@@ -10,6 +10,26 @@
 
 export type MentionPermission = NotificationPermission | 'unsupported';
 
+/**
+ * Kanal-Labels aus MESSAGE_CREATE-Kontexten (Phase 15): Für Kanäle des gerade
+ * NICHT ausgewählten Servers fehlt dem Client das Kanal-Mapping – der Server
+ * schickt deshalb Kanal- und Server-Name (Metadaten) im Event mit. Nur im
+ * Speicher, wächst höchstens um die in dieser Session beschriebenen Kanäle.
+ */
+const channelLabels = new Map<string, string>();
+
+export function rememberChannelLabel(channelId: string, label: string): void {
+  channelLabels.set(channelId, label);
+}
+
+export function recallChannelLabel(channelId: string): string | null {
+  return channelLabels.get(channelId) ?? null;
+}
+
+export function resetChannelLabels(): void {
+  channelLabels.clear();
+}
+
 export function mentionPermission(): MentionPermission {
   return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
 }

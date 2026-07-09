@@ -42,6 +42,18 @@ export interface MessageInfo {
   editedAt: string | null;
 }
 
+/**
+ * Dispatch-Payload von MESSAGE_CREATE (Phase 15: + Kanal-Kontext).
+ * `context` nennt Kanal- und Server-Name (reine Server-Metadaten, kein
+ * E2EE-Inhalt), damit Clients Benachrichtigungen auch für Kanäle formulieren
+ * können, deren Server gerade nicht ausgewählt ist. Bei DMs entfällt er –
+ * DM-Kanäle kennt der Client ohnehin vollständig.
+ */
+export interface MessageCreatePayload {
+  message: MessageInfo;
+  context?: { channelName: string; serverName: string };
+}
+
 export interface SendMessageRequest {
   ciphertext: string;
   nonce: string;

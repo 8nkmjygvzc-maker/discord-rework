@@ -10,6 +10,20 @@ import { useServersStore } from '../store/servers';
 import Modal from './Modal';
 import { ApiError } from '../lib/api';
 
+/** Auswahl-Palette für Rollenfarben (Phase 15), angelehnt an Discord-Töne. */
+const ROLE_COLORS = [
+  '#e74c3c',
+  '#e67e22',
+  '#f1c40f',
+  '#2ecc71',
+  '#1abc9c',
+  '#3498db',
+  '#9b59b6',
+  '#e91e63',
+  '#95a5a6',
+  '#607d8b',
+];
+
 /** Rollenverwaltung: Rollen anlegen/bearbeiten/löschen, Mitgliedern zuweisen. */
 export default function RolesDialog({ onClose }: { onClose: () => void }) {
   const server = useServersStore((s) => s.selectedServer);
@@ -121,6 +135,41 @@ export default function RolesDialog({ onClose }: { onClose: () => void }) {
               );
             })}
           </ul>
+
+          {/* Rollenfarbe (Phase 15): färbt Namen im Chat und Mitglieder-Panel.
+              Die Standardrolle bleibt farblos – sie gilt für alle. */}
+          {!role.isDefault && (
+            <>
+              <h3 className="mt-4 text-sm font-semibold text-zinc-200">Farbe</h3>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="role-colors">
+                {ROLE_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    title={color}
+                    onClick={() => void run(() => updateRole(role.id, { color }))}
+                    className={`h-6 w-6 rounded-full border-2 ${
+                      role.color?.toLowerCase() === color
+                        ? 'border-white'
+                        : 'border-transparent hover:border-zinc-400'
+                    }`}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+                <button
+                  type="button"
+                  onClick={() => void run(() => updateRole(role.id, { color: null }))}
+                  className={`ml-1 rounded border px-2 py-0.5 text-xs ${
+                    role.color
+                      ? 'border-zinc-600 text-zinc-400 hover:bg-zinc-700'
+                      : 'border-zinc-500 text-zinc-200'
+                  }`}
+                >
+                  Keine Farbe
+                </button>
+              </div>
+            </>
+          )}
 
           {!role.isDefault && (
             <>

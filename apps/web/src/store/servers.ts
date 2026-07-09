@@ -35,7 +35,10 @@ interface ServersState {
   deleteChannel: (channelId: string) => Promise<void>;
 
   createRole: (name: string) => Promise<void>;
-  updateRole: (roleId: string, changes: { name?: string; permissions?: string }) => Promise<void>;
+  updateRole: (
+    roleId: string,
+    changes: { name?: string; permissions?: string; color?: string | null },
+  ) => Promise<void>;
   deleteRole: (roleId: string) => Promise<void>;
   setMemberRole: (userId: string, roleId: string, assign: boolean) => Promise<void>;
 

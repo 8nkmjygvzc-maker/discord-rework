@@ -8,6 +8,7 @@ import {
 import { Message, Prisma } from '@prisma/client';
 import {
   EncryptedMessageHeader,
+  MessageCreatePayload,
   MessageDeletePayload,
   MessageHistoryResponse,
   MessageInfo,
@@ -84,13 +85,28 @@ export class MessagesService {
     });
 
     const info = toMessageInfo(message);
-    await this.gateway.publishDispatch('MESSAGE_CREATE', { message: info }, recipients);
+    // Kanal-Kontext (Phase 15): Kanal- und Server-Name sind Server-Metadaten
+    // (kein E2EE-Inhalt) – Clients können damit Erwähnungs-Benachrichtigungen
+    // auch für Kanäle formulieren, deren Server gerade nicht ausgewählt ist.
+    const channelMeta = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { name: true, type: true, server: { select: { name: true } } },
+    });
+    const payload: MessageCreatePayload = {
+      message: info,
+      ...(channelMeta?.server
+        ? { context: { channelName: channelMeta.name, serverName: channelMeta.server.name } }
+        : {}),
+    };
+    await this.gateway.publishDispatch('MESSAGE_CREATE', payload, recipients);
     // Web-Push für DMs (Phase 12): den offline DM-Partner benachrichtigen.
     // Server-Kanäle laufen über den Erwähnungs-Hint (notifyMentions), weil der
     // Server Erwähnungen im Ciphertext nicht erkennen kann. Best-effort.
-    void this.pushDirectMessage(channelId, userId, message.sender.username, recipients).catch(
-      () => undefined,
-    );
+    if (channelMeta?.type === 'DM') {
+      void this.pushDirectMessage(channelId, userId, message.sender.username, recipients).catch(
+        () => undefined,
+      );
+    }
     return info;
   }
 
@@ -221,11 +237,6 @@ export class MessagesService {
     senderUsername: string,
     recipients: string[],
   ): Promise<void> {
-    const channel = await this.prisma.channel.findUnique({
-      where: { id: channelId },
-      select: { type: true },
-    });
-    if (channel?.type !== 'DM') return;
     const targets = recipients.filter((r) => r !== senderId);
     await Promise.all(
       targets.map((userId) =>

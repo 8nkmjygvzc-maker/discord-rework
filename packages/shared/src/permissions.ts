@@ -89,6 +89,7 @@ export interface CreateRoleRequest {
 export interface UpdateRoleRequest {
   name?: string;
   permissions?: string;
-  color?: string;
+  /** Hex-Farbwert wie `#5865f2`; `null` entfernt die Farbe wieder. */
+  color?: string | null;
   position?: number;
 }

@@ -38,6 +38,8 @@ interface MessageRowProps {
   hasThread: boolean;
   /** Kurzes Aufleuchten nach „zum Original springen“. */
   flash: boolean;
+  /** Rollenfarbe des Absenders (höchste Rolle mit Farbe, Phase 15). */
+  senderColor: string | null;
   onToggleReaction: (emoji: string, mine: boolean) => void;
   onReply: () => void;
   onOpenThread: () => void;
@@ -62,6 +64,7 @@ export default function MessageRow({
   canManageMessages,
   hasThread,
   flash,
+  senderColor,
   onToggleReaction,
   onReply,
   onOpenThread,
@@ -144,7 +147,10 @@ export default function MessageRow({
       <div className="min-w-0 flex-1">
         {!grouped && (
           <p className="text-sm">
-            <span className={`font-semibold ${isOwn ? 'text-indigo-400' : 'text-zinc-200'}`}>
+            <span
+              className={`font-semibold ${isOwn ? 'text-indigo-400' : 'text-zinc-200'}`}
+              style={senderColor ? { color: senderColor } : undefined}
+            >
               {message.senderUsername}
             </span>
             <span className="ml-2 text-xs text-zinc-500">

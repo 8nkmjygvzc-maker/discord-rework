@@ -1,5 +1,6 @@
 import { useServersStore } from '../store/servers';
 import { useFriendsStore } from '../store/friends';
+import { useDmsStore } from '../store/dms';
 
 interface ServerRailProps {
   /** true = Home-Ansicht (DMs/Freunde) ist aktiv. */
@@ -21,6 +22,9 @@ export default function ServerRail({
   const servers = useServersStore((s) => s.servers);
   const selectedId = useServersStore((s) => s.selectedServer?.id);
   const incomingCount = useFriendsStore((s) => s.list.incoming.length);
+  // Ungelesene DMs (Phase 15) zählen mit auf den Zuhause-Badge.
+  const unreadDmCount = useDmsStore((s) => Object.values(s.unread).reduce((sum, n) => sum + n, 0));
+  const homeBadge = incomingCount + unreadDmCount;
 
   return (
     <nav className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-zinc-950 py-3">
@@ -36,12 +40,12 @@ export default function ServerRail({
         data-testid="home-button"
       >
         P
-        {incomingCount > 0 && (
+        {homeBadge > 0 && (
           <span
-            title={`${incomingCount} offene Freundschaftsanfrage(n)`}
+            title={`${incomingCount} offene Freundschaftsanfrage(n), ${unreadDmCount} ungelesene Direktnachricht(en)`}
             className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-zinc-950 bg-red-500 text-[10px] font-bold"
           >
-            {incomingCount}
+            {homeBadge > 9 ? '9+' : homeBadge}
           </span>
         )}
       </button>

@@ -11,9 +11,11 @@ export class UpdateRoleDto {
   @IsNumberString()
   permissions?: string;
 
+  // @IsOptional() lässt neben undefined auch null durch – null ENTFERNT die
+  // Farbe (Prisma setzt die Spalte auf NULL), undefined lässt sie unverändert.
   @IsOptional()
   @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'color muss ein Hex-Farbwert wie #5865f2 sein' })
-  color?: string;
+  color?: string | null;
 
   @IsOptional()
   @IsInt()
