@@ -13,16 +13,20 @@ export const Permissions = {
   ManageRoles: 1n << 3n,
   /** Server umbenennen, Icon ändern. */
   ManageServer: 1n << 4n,
-  /** Mitglieder entfernen (ab Phase 13). */
+  /** Mitglieder entfernen (Phase 13). */
   KickMembers: 1n << 5n,
-  /** Mitglieder bannen (ab Phase 13). */
+  /** Mitglieder bannen/entbannen (Phase 13). */
   BanMembers: 1n << 6n,
-  /** Fremde Nachrichten löschen (ab Phase 9/13). */
+  /** Fremde Nachrichten löschen (Phase 13). */
   ManageMessages: 1n << 7n,
   /** Alle Rechte, unabhängig von anderen Bits. */
   Administrator: 1n << 8n,
   /** Einladungslinks erstellen (Phase 12). */
   CreateInvite: 1n << 9n,
+  /** Mitglieder befristet in Auszeit schicken (Timeout) + Voice-Trennen (Phase 13). */
+  ModerateMembers: 1n << 10n,
+  /** Das Audit-Log moderativer Aktionen einsehen (Phase 13). */
+  ViewAuditLog: 1n << 11n,
 } as const;
 
 export type PermissionName = keyof typeof Permissions;
@@ -39,7 +43,9 @@ export const PERMISSION_LIST: { name: PermissionName; label: string }[] = [
   { name: 'ManageServer', label: 'Server verwalten' },
   { name: 'KickMembers', label: 'Mitglieder kicken' },
   { name: 'BanMembers', label: 'Mitglieder bannen' },
+  { name: 'ModerateMembers', label: 'Mitglieder in Auszeit / aus Voice trennen' },
   { name: 'ManageMessages', label: 'Nachrichten verwalten' },
+  { name: 'ViewAuditLog', label: 'Audit-Log einsehen' },
   { name: 'CreateInvite', label: 'Einladungen erstellen' },
   { name: 'Administrator', label: 'Administrator (alle Rechte)' },
 ];

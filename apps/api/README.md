@@ -163,6 +163,48 @@ deaktiviert (Schlüssel erzeugen: `node -e "console.log(require('web-push').gene
 | POST    | `/api/push/subscribe`        | Browser-Subscription registrieren        |
 | POST    | `/api/push/unsubscribe`      | Subscription entfernen (Logout/Schalter) |
 
+## Moderation (Phase 13)
+
+Kick/Bann/Timeout, Voice-Trennen und ein Audit-Log (`moderation/`-Modul).
+Serverseitig durchgesetzt über das jeweilige Rechte-Bit UND eine **Rollen-
+Hierarchie**: moderiert werden darf nur, wer einen strikt höheren Rang hat
+(höchste Rollen-Position; Owner = ∞) – nie der Owner, nie man selbst
+(`PermissionsService.getMemberRank`, `assertCanModerate`). Jede Aktion schreibt
+einen `AuditLogEntry` (mit denormalisiertem `targetUsername`).
+
+| Methode | Pfad                                                | Recht           |
+| ------- | --------------------------------------------------- | --------------- |
+| POST    | `/api/servers/:id/members/:userId/kick`             | KickMembers     |
+| PUT     | `/api/servers/:id/bans/:userId`                     | BanMembers      |
+| DELETE  | `/api/servers/:id/bans/:userId`                     | BanMembers      |
+| GET     | `/api/servers/:id/bans`                             | BanMembers      |
+| PUT     | `/api/servers/:id/members/:userId/timeout`          | ModerateMembers |
+| DELETE  | `/api/servers/:id/members/:userId/timeout`          | ModerateMembers |
+| POST    | `/api/servers/:id/members/:userId/voice-disconnect` | ModerateMembers |
+| GET     | `/api/servers/:id/audit-log`                        | ViewAuditLog    |
+
+Durchsetzung: Ein **Bann** sperrt (Neu-)Beitritte inkl. Invite-Einlösung
+(`ServersService.assertNotBanned`, geprüft VOR dem Verbrauch einer Nutzung).
+Eine **Auszeit** (`Membership.timeoutUntil`) blockiert Senden/Uploads
+(`ChannelAccessService`) und den Voice-Beitritt (`VoiceService.join`), erlaubt
+aber weiterhin Lesen; sie trennt zusätzlich aus dem Voice.
+**Voice-Trennen** publiziert `voice:force-disconnect` über Redis; der SFU
+(`apps/voice`) schließt die Medien-WS (Close-Code 4006) und räumt den Roster.
+Events: `SERVER_MEMBER_REMOVE` (Kick/Bann), `SERVER_MEMBER_UPDATE` (Timeout),
+`VOICE_STATE_UPDATE` (Voice-Trennen).
+
+### Nachrichten bearbeiten/löschen (Phase 13)
+
+| Methode | Pfad                                    | Zweck                                              |
+| ------- | --------------------------------------- | -------------------------------------------------- |
+| PATCH   | `/api/channels/:id/messages/:messageId` | eigene Nachricht bearbeiten (E2EE neu, `editedAt`) |
+| DELETE  | `/api/channels/:id/messages/:messageId` | löschen: Autor immer, sonst ManageMessages         |
+
+`MESSAGE_UPDATE`/`MESSAGE_DELETE` erreichen die Kanal-Mitglieder als
+Gateway-Event. Löscht ein Moderator eine fremde Nachricht (ManageMessages,
+nur Server-Kanäle), entsteht ein Audit-Eintrag; gebundene MinIO-Blobs (Phase 8)
+werden mit entfernt (`MessagesService.removeBlobs`).
+
 ## Datenbank
 
 ```bash

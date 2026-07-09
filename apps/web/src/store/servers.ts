@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import {
+  AuditLogEntryInfo,
+  BanInfo,
   ChannelDeletePayload,
   ChannelInfo,
   GatewayEventType,
@@ -36,6 +38,16 @@ interface ServersState {
   updateRole: (roleId: string, changes: { name?: string; permissions?: string }) => Promise<void>;
   deleteRole: (roleId: string) => Promise<void>;
   setMemberRole: (userId: string, roleId: string, assign: boolean) => Promise<void>;
+
+  /** Moderation (Phase 13) – Durchsetzung + Broadcasts laufen serverseitig. */
+  kickMember: (userId: string, reason?: string) => Promise<void>;
+  banMember: (userId: string, reason?: string) => Promise<void>;
+  unbanMember: (userId: string) => Promise<void>;
+  timeoutMember: (userId: string, durationSeconds: number, reason?: string) => Promise<void>;
+  removeMemberTimeout: (userId: string) => Promise<void>;
+  voiceDisconnectMember: (userId: string) => Promise<void>;
+  listBans: () => Promise<BanInfo[]>;
+  loadAuditLog: () => Promise<AuditLogEntryInfo[]>;
 
   /** Effektive eigene Rechte im ausgewählten Server (0n ohne Auswahl). */
   myPermissions: () => bigint;
@@ -181,6 +193,69 @@ export const useServersStore = create<ServersState>()((set, get) => ({
     });
   },
 
+  // --- Moderation (Phase 13) – die Server-Events aktualisieren den Store ------
+
+  kickMember: async (userId, reason) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/servers/${serverId}/members/${userId}/kick`, {
+      method: 'POST',
+      body: { reason },
+    });
+  },
+
+  banMember: async (userId, reason) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/servers/${serverId}/bans/${userId}`, {
+      method: 'PUT',
+      body: { reason },
+    });
+  },
+
+  unbanMember: async (userId) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/servers/${serverId}/bans/${userId}`, { method: 'DELETE' });
+  },
+
+  timeoutMember: async (userId, durationSeconds, reason) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/servers/${serverId}/members/${userId}/timeout`, {
+      method: 'PUT',
+      body: { durationSeconds, reason },
+    });
+  },
+
+  removeMemberTimeout: async (userId) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/servers/${serverId}/members/${userId}/timeout`, {
+      method: 'DELETE',
+    });
+  },
+
+  voiceDisconnectMember: async (userId) => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return;
+    await authFetch<void>(`/api/servers/${serverId}/members/${userId}/voice-disconnect`, {
+      method: 'POST',
+    });
+  },
+
+  listBans: () => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return Promise.resolve([]);
+    return authFetch<BanInfo[]>(`/api/servers/${serverId}/bans`);
+  },
+
+  loadAuditLog: () => {
+    const serverId = get().selectedServer?.id;
+    if (!serverId) return Promise.resolve([]);
+    return authFetch<AuditLogEntryInfo[]>(`/api/servers/${serverId}/audit-log`);
+  },
+
   myPermissions: () => {
     const details = get().selectedServer;
     return details ? permissionsFromString(details.myPermissions) : 0n;
@@ -240,6 +315,23 @@ export const useServersStore = create<ServersState>()((set, get) => ({
                 selectedServer: {
                   ...s.selectedServer,
                   members: s.selectedServer.members.filter((m) => m.userId !== userId),
+                },
+              }
+            : {},
+        );
+        return;
+      }
+      case 'SERVER_MEMBER_UPDATE': {
+        // Phase 13: aktualisiertes Mitglied (z. B. Timeout gesetzt/aufgehoben).
+        const { serverId, member } = d as { serverId: string; member: ServerMember };
+        set((s) =>
+          s.selectedServer?.id === serverId
+            ? {
+                selectedServer: {
+                  ...s.selectedServer,
+                  members: s.selectedServer.members.map((m) =>
+                    m.userId === member.userId ? member : m,
+                  ),
                 },
               }
             : {},

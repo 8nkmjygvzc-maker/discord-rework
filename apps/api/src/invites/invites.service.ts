@@ -128,6 +128,9 @@ export class InvitesService {
     });
     if (existing) return this.servers.getServerDetails(invite.serverId, userId);
 
+    // Gebannt? VOR dem Verbrauchen einer Nutzung abbrechen (Phase 13).
+    await this.servers.assertNotBanned(invite.serverId, userId);
+
     // Nutzung atomar verbrauchen – bei Limit nur, solange uses < maxUses
     // (verhindert Überschreiten bei gleichzeitigem Einlösen).
     if (invite.maxUses !== null) {

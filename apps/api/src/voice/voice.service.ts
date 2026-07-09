@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -20,6 +26,11 @@ const VOICE_TOKEN_TTL = '120s';
  * Clients geschlossen wurde (auch bei Absturz). Payload: { userId, channelId }.
  */
 const VOICE_DISCONNECT_CHANNEL = 'voice:disconnect';
+/**
+ * Redis-Kanal, über den die API den SFU anweist, die Medien-WS eines Nutzers zu
+ * schließen (Voice-Moderation, Phase 13). Payload: { userId, channelId }.
+ */
+const VOICE_FORCE_DISCONNECT_CHANNEL = 'voice:force-disconnect';
 
 /**
  * Phase 10 – Roster-Autorität für Sprachkanäle. Die API besitzt den Zustand
@@ -68,6 +79,15 @@ export class VoiceService implements OnModuleInit {
     // Beitreten verlangt (wie Lesen) ViewChannels – wirft 404 für Nicht-Mitglieder,
     // 403 ohne Recht. Eigene Connect/Speak-Rechte kommen später (siehe ROADMAP).
     await this.permissions.requirePermission(channel.serverId, userId, Permissions.ViewChannels);
+
+    // Auszeit (Phase 13): blockiert auch den Beitritt zu Sprachkanälen.
+    const membership = await this.prisma.membership.findUnique({
+      where: { userId_serverId: { userId, serverId: channel.serverId } },
+      select: { timeoutUntil: true },
+    });
+    if (membership?.timeoutUntil && membership.timeoutUntil.getTime() > Date.now()) {
+      throw new ForbiddenException('Du bist in Auszeit und kannst keinem Sprachkanal beitreten');
+    }
 
     // In einem anderen Sprachkanal? Erst dort sauber austreten (Kanalwechsel).
     const existing = await this.prisma.voiceSession.findUnique({ where: { userId } });
@@ -152,6 +172,31 @@ export class VoiceService implements OnModuleInit {
       username,
       state: { muted, deafened, cameraOn, screenOn },
     });
+  }
+
+  /**
+   * Voice-Moderation (Phase 13): trennt einen Nutzer aus dem Sprachkanal – aber
+   * nur, wenn seine Session zu einem Kanal DIESES Servers gehört. Weist den SFU
+   * an, die Medien-WS zu schließen, und räumt Roster/Session. Liefert false,
+   * wenn der Nutzer in keinem Sprachkanal des Servers sitzt.
+   */
+  async forceDisconnect(userId: string, serverId: string): Promise<boolean> {
+    const session = await this.prisma.voiceSession.findUnique({
+      where: { userId },
+      include: {
+        user: { select: { username: true } },
+        channel: { select: { serverId: true } },
+      },
+    });
+    if (!session || session.channel.serverId !== serverId) return false;
+    // SFU anweisen, die Medien-WS zu schließen (der SFU meldet die Trennung
+    // ohnehin zurück; removeSession räumt den Roster idempotent sofort).
+    await this.redis.client.publish(
+      VOICE_FORCE_DISCONNECT_CHANNEL,
+      JSON.stringify({ userId, channelId: session.channelId }),
+    );
+    await this.removeSession(session.channelId, userId, session.user.username);
+    return true;
   }
 
   // --- intern ---------------------------------------------------------------

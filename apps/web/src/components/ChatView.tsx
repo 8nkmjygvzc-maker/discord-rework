@@ -38,6 +38,8 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const loadOlder = useMessagesStore((s) => s.loadOlder);
   const sendMessage = useMessagesStore((s) => s.sendMessage);
   const sendReaction = useMessagesStore((s) => s.sendReaction);
+  const editMessage = useMessagesStore((s) => s.editMessage);
+  const deleteMessage = useMessagesStore((s) => s.deleteMessage);
 
   const [draft, setDraft] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -195,6 +197,24 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     });
   }
 
+  async function handleEdit(messageId: string, newText: string) {
+    setError(null);
+    try {
+      await editMessage(channel.id, messageId, newText);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bearbeiten fehlgeschlagen');
+      throw err; // Bearbeitungsfeld offen lassen
+    }
+  }
+
+  function handleDelete(messageId: string) {
+    if (!window.confirm('Diese Nachricht wirklich löschen?')) return;
+    setError(null);
+    deleteMessage(channel.id, messageId).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
+    });
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const content = draft.trim();
@@ -236,6 +256,8 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
 
   const canSend =
     dm || hasPermission(permissionsFromString(myPermissions), Permissions.SendMessages);
+  const canManageMessages =
+    !dm && hasPermission(permissionsFromString(myPermissions), Permissions.ManageMessages);
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
@@ -357,12 +379,15 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
                 knownUsernames={knownUsernames}
                 reactionEvents={reactions[msg.id]}
                 canSend={canSend}
+                canManageMessages={canManageMessages}
                 hasThread={childrenByParent.has(msg.id) || !!content?.replyTo}
                 flash={flashId === msg.id}
                 onToggleReaction={(emoji, mine) => toggleReaction(msg.id, emoji, mine)}
                 onReply={() => startReply(msg.id)}
                 onOpenThread={() => setThreadRootId(msg.id)}
                 onJumpTo={jumpTo}
+                onEdit={(newText) => handleEdit(msg.id, newText)}
+                onDelete={() => handleDelete(msg.id)}
               />
             );
           })}

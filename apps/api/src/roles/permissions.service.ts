@@ -51,6 +51,31 @@ export class PermissionsService {
   }
 
   /**
+   * „Rang“ eines Mitglieds für die Moderations-Hierarchie (Phase 13): die
+   * höchste Position seiner zugewiesenen Rollen (die Standardrolle liegt bei 0).
+   * Der Owner steht über allem (+∞), Nicht-Mitglieder liefern null. Ein Mitglied
+   * darf nur Ziele mit STRIKT niedrigerem Rang moderieren – so kann niemand
+   * gleich- oder höherrangige Mitglieder (oder den Owner) kicken/bannen/timeouten.
+   */
+  async getMemberRank(serverId: string, userId: string): Promise<number | null> {
+    const membership = await this.prisma.membership.findUnique({
+      where: { userId_serverId: { userId, serverId } },
+      include: {
+        server: { select: { ownerId: true } },
+        roles: { include: { role: { select: { position: true } } } },
+      },
+    });
+    if (!membership) return null;
+    if (membership.server.ownerId === userId) return Number.POSITIVE_INFINITY;
+
+    let rank = 0;
+    for (const assignment of membership.roles) {
+      if (assignment.role.position > rank) rank = assignment.role.position;
+    }
+    return rank;
+  }
+
+  /**
    * IDs aller Mitglieder, deren effektive Rechte `required` enthalten – für
    * gezielte Gateway-Dispatches (z. B. MESSAGE_CREATE nur an Mitglieder mit
    * ViewChannels). Rechnet die Bitfelder in einem Rutsch im Speicher aus,

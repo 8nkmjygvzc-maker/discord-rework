@@ -1,7 +1,7 @@
 // Datenmodell (wächst phasenweise per Migration):
 // Phase 1: User, RefreshToken – Phase 3: Server, Membership, Channel –
 // Phase 4: Message – Phase 6: Device, KeyEnvelope – Phase 7: Friendship, DmMember –
-// Phase 8: Attachment – Phase 10: VoiceSession
+// Phase 8: Attachment – Phase 10: VoiceSession – Phase 13: Ban, AuditLogEntry
 
 generator client {
   provider = "prisma-client-js"
@@ -37,6 +37,9 @@ model User {
   voiceSession    VoiceSession?
   invitesCreated  Invite[]           @relation("InviteCreator")
   pushSubs        PushSubscription[]
+  bans            Ban[]              @relation("BannedUser")
+  auditActions    AuditLogEntry[]    @relation("AuditActor")
+  auditTargeted   AuditLogEntry[]    @relation("AuditTarget")
 }
 
 // Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –
@@ -117,6 +120,8 @@ model Server {
   channels Channel[]
   roles    Role[]
   invites  Invite[]
+  bans     Ban[]
+  auditLog AuditLogEntry[]
 }
 
 model Membership {
@@ -126,6 +131,9 @@ model Membership {
   server   Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
   nickname String?
   joinedAt DateTime @default(now())
+  // Phase 13: Ende einer befristeten Auszeit (Timeout). Liegt der Zeitpunkt in
+  // der Zukunft, blockiert der Server Senden/Uploads und den Voice-Beitritt.
+  timeoutUntil DateTime?
 
   roles MemberRole[]
 
@@ -303,4 +311,40 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// Phase 13: Aktive Bannungen. Solange eine Zeile existiert, blockiert der
+// Server (Neu-)Beitritte des Nutzers – auch über Einladungslinks. `bannedById`
+// ist bewusst ohne Relation (der Bannende ist ohnehin Server-Mitglied und wird
+// beim Auflisten separat aufgelöst).
+model Ban {
+  serverId   String
+  server     Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation("BannedUser", fields: [userId], references: [id], onDelete: Cascade)
+  bannedById String
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@id([serverId, userId])
+  @@index([serverId])
+}
+
+// Phase 13: Protokoll moderativer Aktionen (CLAUDE.md §5). `targetUsername` ist
+// denormalisiert, damit ein Eintrag lesbar bleibt, wenn das Zielmitglied den
+// Server später verlässt oder entbannt wird.
+model AuditLogEntry {
+  id             String   @id @default(uuid())
+  serverId       String
+  server         Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  actorId        String
+  actor          User     @relation("AuditActor", fields: [actorId], references: [id], onDelete: Cascade)
+  action         String
+  targetUserId   String?
+  targetUser     User?    @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetUsername String?
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@index([serverId, createdAt])
 }

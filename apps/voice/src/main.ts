@@ -6,6 +6,8 @@ import { SignalingServer } from './signaling';
 
 /** Redis-Kanal, über den der API-Roster von Trennungen erfährt (siehe VoiceService). */
 const VOICE_DISCONNECT_CHANNEL = 'voice:disconnect';
+/** Redis-Kanal, über den die API Voice-Trennungen anweist (Moderation, Phase 13). */
+const VOICE_FORCE_DISCONNECT_CHANNEL = 'voice:force-disconnect';
 
 async function bootstrap(): Promise<void> {
   const mediasoup = new MediasoupManager();
@@ -15,6 +17,19 @@ async function bootstrap(): Promise<void> {
 
   const signaling = new SignalingServer(mediasoup, (userId, channelId) => {
     void redis.publish(VOICE_DISCONNECT_CHANNEL, JSON.stringify({ userId, channelId }));
+  });
+
+  // Eigene Verbindung zum Abonnieren (eine Redis-Verbindung im Subscribe-Modus
+  // kann nicht publishen). Auf Moderations-Trennungen der API reagieren.
+  const subscriber = new Redis(config.redisUrl, { maxRetriesPerRequest: 3 });
+  void subscriber.subscribe(VOICE_FORCE_DISCONNECT_CHANNEL);
+  subscriber.on('message', (_channel, message) => {
+    try {
+      const { userId, channelId } = JSON.parse(message) as { userId?: string; channelId?: string };
+      if (userId && channelId) signaling.forceDisconnect(userId, channelId);
+    } catch {
+      console.warn('Ungültiges voice:force-disconnect-Signal verworfen');
+    }
   });
 
   // Eigener HTTP-Server: /health für Probes, /voice ist die Signaling-WS.
@@ -37,6 +52,7 @@ async function bootstrap(): Promise<void> {
     signaling.close();
     void mediasoup.close();
     void redis.quit();
+    void subscriber.quit();
     server.close(() => process.exit(0));
     // Notausgang, falls Verbindungen hängen.
     setTimeout(() => process.exit(0), 3000).unref();

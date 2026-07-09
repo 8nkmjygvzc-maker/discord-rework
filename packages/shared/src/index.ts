@@ -4,6 +4,7 @@ export * from './gateway';
 export * from './servers';
 export * from './messages';
 export * from './permissions';
+export * from './moderation';
 export * from './e2ee';
 export * from './friends';
 export * from './voice';

@@ -19,6 +19,11 @@ export interface ServerMember {
   joinedAt: string;
   /** Zugewiesene Rollen (ohne die implizite Standardrolle). */
   roleIds: string[];
+  /**
+   * Ende einer aktiven Auszeit (Timeout, Phase 13) als ISO-String, sonst null.
+   * Liegt der Zeitpunkt in der Vergangenheit, ist die Auszeit abgelaufen.
+   */
+  timeoutUntil: string | null;
 }
 
 export interface ChannelInfo {

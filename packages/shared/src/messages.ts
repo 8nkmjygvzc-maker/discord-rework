@@ -50,6 +50,17 @@ export interface SendMessageRequest {
   attachmentIds?: string[];
 }
 
+/**
+ * Nachricht bearbeiten (Phase 13). Nur der Autor; da Ende-zu-Ende-verschlüsselt,
+ * ersetzt der Client den kompletten Ciphertext (neu verschlüsselt mit dem
+ * aktuellen Sender-Key). Anhänge bleiben unverändert.
+ */
+export interface EditMessageRequest {
+  ciphertext: string;
+  nonce: string;
+  header: EncryptedMessageHeader;
+}
+
 /** Antwort der History: älteste zuerst, `hasMore` für „Ältere laden“. */
 export interface MessageHistoryResponse {
   messages: MessageInfo[];

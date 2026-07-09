@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -16,6 +18,7 @@ import type { AccessTokenPayload } from '../auth/auth.service';
 import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { MessagesService } from './messages.service';
 import { SendMessageDto } from './dto/send-message.dto';
+import { EditMessageDto } from './dto/edit-message.dto';
 import { NotifyMentionsDto } from './dto/notify-mentions.dto';
 
 @Controller('channels/:channelId')
@@ -40,6 +43,30 @@ export class MessagesController {
     @Query('before') before?: string,
   ): Promise<MessageHistoryResponse> {
     return this.messages.history(channelId, user.sub, before);
+  }
+
+  /** Eigene Nachricht bearbeiten (Phase 13). */
+  @Patch('messages/:messageId')
+  @RateLimit({ limit: 30, windowS: 30 })
+  edit(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: EditMessageDto,
+  ): Promise<MessageInfo> {
+    return this.messages.editMessage(channelId, messageId, user.sub, dto);
+  }
+
+  /** Nachricht löschen (Autor oder ManageMessages in Server-Kanälen, Phase 13). */
+  @Delete('messages/:messageId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RateLimit({ limit: 30, windowS: 30 })
+  remove(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+  ): Promise<void> {
+    return this.messages.deleteMessage(channelId, messageId, user.sub);
   }
 
   /**

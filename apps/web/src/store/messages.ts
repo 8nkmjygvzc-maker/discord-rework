@@ -66,8 +66,14 @@ interface MessagesState {
     emoji: string,
     action: 'add' | 'remove',
   ) => Promise<void>;
+  /** Eigene Nachricht bearbeiten (Phase 13) – Text neu verschlüsseln. */
+  editMessage: (channelId: string, messageId: string, content: string) => Promise<void>;
+  /** Nachricht löschen (Autor oder Moderation, Phase 13). */
+  deleteMessage: (channelId: string, messageId: string) => Promise<void>;
 
   handleMessageCreate: (message: MessageInfo) => void;
+  handleMessageUpdate: (message: MessageInfo, content?: DecodedMessageContent) => void;
+  handleMessageDelete: (channelId: string, messageId: string) => void;
   retryUndecrypted: () => void;
   reset: () => void;
 }
@@ -76,7 +82,7 @@ const EMPTY: ChannelMessages = { messages: [], hasMore: false, loaded: false };
 
 function authFetch<T>(
   path: string,
-  options?: { method?: 'GET' | 'POST'; body?: unknown },
+  options?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown },
 ): Promise<T> {
   return useAuthStore.getState().authFetch<T>(path, options);
 }
@@ -186,6 +192,30 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     get().handleMessageCreate(message);
   },
 
+  editMessage: async (channelId, messageId, content) => {
+    const { serverId, memberIds } = resolveChannelContext(channelId);
+    // Anhänge und Antwort-Bezug der Originalnachricht erhalten (ihre
+    // Dateischlüssel stecken im Klartext – ginge sonst beim Neu-Verschlüsseln
+    // verloren). Nur der Text wird ersetzt.
+    const existing = get().decrypted[messageId];
+    const plaintext = encodeMessageContent(
+      content,
+      existing?.attachments ?? [],
+      existing?.replyTo ?? undefined,
+    );
+    const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
+    const message = await authFetch<MessageInfo>(
+      `/api/channels/${channelId}/messages/${messageId}`,
+      { method: 'PATCH', body: payload },
+    );
+    get().handleMessageUpdate(message, decodeMessageContent(plaintext));
+  },
+
+  deleteMessage: async (channelId, messageId) => {
+    await authFetch<void>(`/api/channels/${channelId}/messages/${messageId}`, { method: 'DELETE' });
+    get().handleMessageDelete(channelId, messageId);
+  },
+
   handleMessageCreate: (message) => {
     set((s) => {
       const chan = s.byChannel[message.channelId];
@@ -194,6 +224,62 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
       return { byChannel: { ...s.byChannel, [message.channelId]: appendMessage(chan, message) } };
     });
     void decryptBatch([message], set, get, true);
+  },
+
+  /**
+   * Bearbeitete Nachricht einspielen (Phase 13). `content` = bekannter Klartext
+   * (eigene Bearbeitung, kein Flackern); ohne `content` wird der geänderte
+   * Ciphertext frisch entschlüsselt.
+   */
+  handleMessageUpdate: (message, content) => {
+    set((s) => {
+      const next: Partial<MessagesState> = {};
+      const chan = s.byChannel[message.channelId];
+      if (chan) {
+        next.byChannel = {
+          ...s.byChannel,
+          [message.channelId]: {
+            ...chan,
+            messages: chan.messages.map((m) => (m.id === message.id ? message : m)),
+          },
+        };
+      }
+      if (content) {
+        next.decrypted = { ...s.decrypted, [message.id]: content };
+      } else {
+        const rest = { ...s.decrypted };
+        delete rest[message.id];
+        next.decrypted = rest;
+      }
+      return next;
+    });
+    if (!content) void decryptBatch([message], set, get, false);
+  },
+
+  /** Gelöschte Nachricht entfernen (idempotent – REST-Aufruf UND Gateway-Event). */
+  handleMessageDelete: (channelId, messageId) => {
+    set((s) => {
+      const next: Partial<MessagesState> = {};
+      const chan = s.byChannel[channelId];
+      if (chan) {
+        next.byChannel = {
+          ...s.byChannel,
+          [channelId]: { ...chan, messages: chan.messages.filter((m) => m.id !== messageId) },
+        };
+      }
+      if (s.decrypted[messageId] !== undefined) {
+        const rest = { ...s.decrypted };
+        delete rest[messageId];
+        next.decrypted = rest;
+      }
+      // Reaktions-Stände, die auf die gelöschte Nachricht zeigen, mit entfernen.
+      if (s.reactions[messageId] !== undefined) {
+        const rest = { ...s.reactions };
+        delete rest[messageId];
+        next.reactions = rest;
+      }
+      return next;
+    });
   },
 
   /** Nach neuen Sender-Keys: alles noch Unentschlüsselte erneut versuchen. */

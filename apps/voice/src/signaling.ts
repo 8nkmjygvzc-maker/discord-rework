@@ -300,6 +300,19 @@ export class SignalingServer {
     }
   }
 
+  /**
+   * Voice-Moderation (Phase 13): schließt die Medien-WS eines Nutzers in einem
+   * Kanal (auf Anweisung der API per Redis). Der reguläre close-Handler
+   * (onPeerGone) räumt den Peer auf und meldet die Trennung zurück.
+   */
+  forceDisconnect(userId: string, channelId: string): void {
+    const room = this.mediasoup.getRoom(channelId);
+    if (!room) return;
+    for (const peer of room.peers.values()) {
+      if (peer.userId === userId) peer.socket.close(4006, 'Von der Moderation getrennt');
+    }
+  }
+
   close(): void {
     this.wss?.close();
   }

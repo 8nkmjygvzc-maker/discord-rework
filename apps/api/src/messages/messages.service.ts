@@ -1,11 +1,26 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Message, Prisma } from '@prisma/client';
-import { EncryptedMessageHeader, MessageHistoryResponse, MessageInfo } from '@parley/shared';
+import {
+  EncryptedMessageHeader,
+  MessageDeletePayload,
+  MessageHistoryResponse,
+  MessageInfo,
+  Permissions,
+} from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { PushService } from '../push/push.service';
+import { PermissionsService } from '../roles/permissions.service';
+import { StorageService } from '../storage/storage.service';
 import { ChannelAccessService } from './channel-access.service';
 import { SendMessageDto } from './dto/send-message.dto';
+import { EditMessageDto } from './dto/edit-message.dto';
 
 /** Seitengröße der History – Client lädt ältere Nachrichten seitenweise nach. */
 const PAGE_SIZE = 50;
@@ -20,10 +35,14 @@ type MessageWithRelations = Message & {
 
 @Injectable()
 export class MessagesService {
+  private readonly logger = new Logger(MessagesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
     private readonly push: PushService,
+    private readonly permissions: PermissionsService,
+    private readonly storage: StorageService,
     private readonly channelAccess: ChannelAccessService,
   ) {}
 
@@ -73,6 +92,126 @@ export class MessagesService {
       () => undefined,
     );
     return info;
+  }
+
+  /**
+   * Nachricht bearbeiten (Phase 13) – nur der Autor. Die Zugriffsprüfung läuft
+   * wie beim Senden (Rechte + Auszeit + DM-Blockierung); der Ciphertext wird
+   * komplett ersetzt und `editedAt` gesetzt.
+   */
+  async editMessage(
+    channelId: string,
+    messageId: string,
+    userId: string,
+    dto: EditMessageDto,
+  ): Promise<MessageInfo> {
+    const recipients = await this.channelAccess.requireChannelAccess(channelId, userId, 'send');
+    const existing = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!existing || existing.channelId !== channelId) {
+      throw new NotFoundException('Nachricht nicht gefunden');
+    }
+    if (existing.senderId !== userId) {
+      throw new ForbiddenException('Nur der Autor kann eine Nachricht bearbeiten');
+    }
+    const message = await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        ciphertext: dto.ciphertext,
+        nonce: dto.nonce,
+        header: dto.header as unknown as Prisma.InputJsonValue,
+        editedAt: new Date(),
+      },
+      include: { sender: { select: { username: true } }, attachments: attachmentSelect },
+    });
+    const info = toMessageInfo(message);
+    await this.gateway.publishDispatch('MESSAGE_UPDATE', { message: info }, recipients);
+    return info;
+  }
+
+  /**
+   * Nachricht löschen (Phase 13). Der Autor darf seine eigene Nachricht löschen;
+   * in Server-Kanälen darf zusätzlich jemand mit ManageMessages fremde löschen
+   * (dann wird die Löschung ins Audit-Log geschrieben). Gebundene MinIO-Blobs
+   * (Phase 8) werden mit entfernt – die DB-Cascade allein ließe sie verwaisen.
+   */
+  async deleteMessage(channelId: string, messageId: string, userId: string): Promise<void> {
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { serverId: true, type: true, dmMembers: { select: { userId: true } } },
+    });
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: { attachments: { select: { objectKey: true } } },
+    });
+    if (!channel || !message || message.channelId !== channelId) {
+      throw new NotFoundException('Nachricht nicht gefunden');
+    }
+
+    let recipients: string[];
+    let byModerator = false;
+    if (channel.type === 'TEXT' && channel.serverId) {
+      // Mitglied sein (Lesen) – wirft 404 für Außenstehende, kein Existenz-Leak.
+      await this.channelAccess.requireChannelAccess(channelId, userId, 'read');
+      if (message.senderId !== userId) {
+        await this.permissions.requirePermission(
+          channel.serverId,
+          userId,
+          Permissions.ManageMessages,
+        );
+        byModerator = true;
+      }
+      recipients = await this.permissions.getMemberIdsWithPermission(
+        channel.serverId,
+        Permissions.ViewChannels,
+      );
+    } else if (channel.type === 'DM') {
+      const memberIds = channel.dmMembers.map((m) => m.userId);
+      if (!memberIds.includes(userId)) throw new NotFoundException('Nachricht nicht gefunden');
+      if (message.senderId !== userId) {
+        throw new ForbiddenException(
+          'In Direktnachrichten kannst du nur eigene Nachrichten löschen',
+        );
+      }
+      recipients = memberIds;
+    } else {
+      throw new NotFoundException('Nachricht nicht gefunden');
+    }
+
+    const objectKeys = message.attachments.map((a) => a.objectKey);
+    // Cascade entfernt die Attachment-Zeilen mit; die Blobs danach best-effort.
+    await this.prisma.message.delete({ where: { id: messageId } });
+    this.removeBlobs(objectKeys);
+    await this.gateway.publishDispatch(
+      'MESSAGE_DELETE',
+      { channelId, messageId } satisfies MessageDeletePayload,
+      recipients,
+    );
+
+    if (byModerator && channel.serverId) {
+      const sender = await this.prisma.user.findUnique({
+        where: { id: message.senderId },
+        select: { username: true },
+      });
+      await this.prisma.auditLogEntry.create({
+        data: {
+          serverId: channel.serverId,
+          actorId: userId,
+          action: 'MESSAGE_DELETE',
+          targetUserId: message.senderId,
+          targetUsername: sender?.username ?? null,
+          reason: null,
+        },
+      });
+    }
+  }
+
+  /** Anhang-Blobs gelöschter Nachrichten aus MinIO entfernen (best-effort). */
+  private removeBlobs(objectKeys: string[]): void {
+    for (const key of objectKeys) {
+      void this.storage.removeObject(key).catch((err: unknown) => {
+        this.logger.warn(`Blob ${key} nicht löschbar: ${String(err)}`);
+      });
+    }
   }
 
   /** Pusht bei einer DM-Nachricht den offline Partner (inhaltsarm). */

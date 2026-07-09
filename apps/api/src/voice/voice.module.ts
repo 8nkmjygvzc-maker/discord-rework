@@ -11,5 +11,7 @@ import { VoiceService } from './voice.service';
   imports: [AuthModule, GatewayModule, RolesModule],
   controllers: [VoiceController],
   providers: [VoiceService],
+  // ModerationModule (Phase 13) nutzt forceDisconnect für Voice-Trennungen.
+  exports: [VoiceService],
 })
 export class VoiceModule {}

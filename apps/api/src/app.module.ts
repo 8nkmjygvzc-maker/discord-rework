@@ -17,6 +17,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { VoiceModule } from './voice/voice.module';
 import { InvitesModule } from './invites/invites.module';
 import { PushModule } from './push/push.module';
+import { ModerationModule } from './moderation/moderation.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PushModule } from './push/push.module';
     VoiceModule,
     InvitesModule,
     PushModule,
+    ModerationModule,
   ],
 })
 export class AppModule {}

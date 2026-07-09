@@ -1,6 +1,7 @@
 import type {
   DmChannelInfo,
   KeyEnvelopeInfo,
+  MessageDeletePayload,
   MessageInfo,
   PresenceSyncPayload,
   PresenceUpdatePayload,
@@ -58,6 +59,14 @@ const client = new GatewayClient({
       case 'MESSAGE_CREATE':
         useMessagesStore.getState().handleMessageCreate((d as { message: MessageInfo }).message);
         return;
+      case 'MESSAGE_UPDATE':
+        useMessagesStore.getState().handleMessageUpdate((d as { message: MessageInfo }).message);
+        return;
+      case 'MESSAGE_DELETE': {
+        const { channelId, messageId } = d as MessageDeletePayload;
+        useMessagesStore.getState().handleMessageDelete(channelId, messageId);
+        return;
+      }
       case 'KEY_ENVELOPE':
         // Fehler nicht eskalieren: Der Umschlag bleibt bis zum Ack in der
         // Mailbox und wird beim nächsten syncEnvelopes erneut zugestellt.

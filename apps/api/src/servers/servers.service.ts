@@ -155,10 +155,24 @@ export class ServersService {
     await this.gateway.publishDispatch('SERVER_DELETE', { serverId }, memberIds);
   }
 
-  /** Beitritt per Server-ID; richtige Invite-Links folgen in Phase 12. */
+  /**
+   * Wirft, wenn der Nutzer von diesem Server gebannt ist (Phase 13). Öffentlich,
+   * damit auch der Invite-Einlöse-Pfad prüfen kann, BEVOR eine Nutzung verbraucht
+   * wird.
+   */
+  async assertNotBanned(serverId: string, userId: string): Promise<void> {
+    const ban = await this.prisma.ban.findUnique({
+      where: { serverId_userId: { serverId, userId } },
+    });
+    if (ban) throw new ForbiddenException('Du bist von diesem Server gebannt');
+  }
+
+  /** Tritt einem Server bei (der Einlöse-Pfad läuft über InvitesService). */
   async join(serverId: string, userId: string): Promise<ServerDetails> {
     const server = await this.prisma.server.findUnique({ where: { id: serverId } });
     if (!server) throw new NotFoundException('Server nicht gefunden');
+
+    await this.assertNotBanned(serverId, userId);
 
     const existing = await this.prisma.membership.findUnique({
       where: { userId_serverId: { userId, serverId } },
@@ -327,12 +341,13 @@ function toChannelInfo(channel: Channel): ChannelInfo {
   };
 }
 
-function toServerMember(m: MembershipWithUser): ServerMember {
+export function toServerMember(m: MembershipWithUser): ServerMember {
   return {
     userId: m.userId,
     username: m.user.username,
     nickname: m.nickname,
     joinedAt: m.joinedAt.toISOString(),
     roleIds: m.roles.map((r) => r.roleId),
+    timeoutUntil: m.timeoutUntil?.toISOString() ?? null,
   };
 }

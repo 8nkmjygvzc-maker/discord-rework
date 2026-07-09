@@ -42,6 +42,8 @@ export class ChannelAccessService {
         userId,
         intent === 'read' ? Permissions.ViewChannels : Permissions.SendMessages,
       );
+      // Auszeit (Phase 13): blockiert Senden/Uploads, aber nicht das Lesen.
+      if (intent !== 'read') await this.assertNotTimedOut(channel.serverId, userId);
       return intent === 'send'
         ? this.permissions.getMemberIdsWithPermission(channel.serverId, Permissions.ViewChannels)
         : [];
@@ -60,5 +62,16 @@ export class ChannelAccessService {
     }
 
     throw new NotFoundException('Kanal nicht gefunden');
+  }
+
+  /** Wirft, wenn das Mitglied gerade eine aktive Auszeit hat (Phase 13). */
+  private async assertNotTimedOut(serverId: string, userId: string): Promise<void> {
+    const membership = await this.prisma.membership.findUnique({
+      where: { userId_serverId: { userId, serverId } },
+      select: { timeoutUntil: true },
+    });
+    if (membership?.timeoutUntil && membership.timeoutUntil.getTime() > Date.now()) {
+      throw new ForbiddenException('Du bist in Auszeit und kannst gerade nichts senden');
+    }
   }
 }

@@ -51,6 +51,12 @@ export type GatewayEventType =
   | 'CHANNEL_DELETE'
   // Phase 4 – Text-Chat:
   | 'MESSAGE_CREATE'
+  // Phase 13 – Nachricht bearbeitet bzw. gelöscht (an dieselben Empfänger
+  // wie MESSAGE_CREATE: Server-Mitglieder mit ViewChannels bzw. DM-Partner).
+  | 'MESSAGE_UPDATE'
+  | 'MESSAGE_DELETE'
+  // Phase 13 – Mitglied aktualisiert (aktuell: Timeout gesetzt/aufgehoben).
+  | 'SERVER_MEMBER_UPDATE'
   // Phase 5 – Rollen & Berechtigungen:
   | 'ROLE_CREATE'
   | 'ROLE_UPDATE'
@@ -127,4 +133,11 @@ export interface ServerMemberRemovePayload {
 export interface ChannelDeletePayload {
   serverId: string;
   channelId: string;
+}
+
+// --- Payloads der Moderations-Events (Phase 13) ---
+
+export interface MessageDeletePayload {
+  channelId: string;
+  messageId: string;
 }
