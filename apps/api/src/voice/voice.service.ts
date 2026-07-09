@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -31,6 +32,19 @@ const VOICE_DISCONNECT_CHANNEL = 'voice:disconnect';
  * schließen (Voice-Moderation, Phase 13). Payload: { userId, channelId }.
  */
 const VOICE_FORCE_DISCONNECT_CHANNEL = 'voice:force-disconnect';
+/**
+ * Liveness-Keys, die der SFU pro verbundenem Peer setzt (Phase 14) – muss zum
+ * Präfix in `apps/voice/src/main.ts` passen. Fehlt der Key, hat die Session
+ * keinen lebenden Medien-Peer mehr.
+ */
+const VOICE_PEER_KEY_PREFIX = 'voice:peer:';
+/** Abgleich-Intervall des Rosters mit den SFU-Liveness-Keys. */
+const RECONCILE_INTERVAL_MS = 30_000;
+/**
+ * Karenz für frische Beitritte: zwischen `join` (Session angelegt) und dem
+ * SFU-Welcome (Liveness-Key gesetzt) darf der Abgleich noch nicht aufräumen.
+ */
+const RECONCILE_JOIN_GRACE_MS = 30_000;
 
 /**
  * Phase 10 – Roster-Autorität für Sprachkanäle. Die API besitzt den Zustand
@@ -40,8 +54,9 @@ const VOICE_FORCE_DISCONNECT_CHANNEL = 'voice:force-disconnect';
  * das Roster auch bei Client-Abstürzen konsistent bleibt.
  */
 @Injectable()
-export class VoiceService implements OnModuleInit {
+export class VoiceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VoiceService.name);
+  private reconcileTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -53,17 +68,55 @@ export class VoiceService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    // Nach einem API-Neustart sind alle Gateway-WS ohnehin getrennt; verwaiste
-    // Sessions leeren, damit das Roster nicht mit Leichen startet. (Einfachheit
-    // für Single-Instance-Dev; Multi-Instance → Redis-Roster, siehe ROADMAP.)
-    const removed = await this.prisma.voiceSession.deleteMany({});
-    if (removed.count > 0) {
-      this.logger.log(`${removed.count} verwaiste Voice-Session(s) beim Start entfernt`);
-    }
-
     const subscriber = this.redis.createSubscriber();
     await subscriber.subscribe(VOICE_DISCONNECT_CHANNEL);
     subscriber.on('message', (_channel, message) => void this.onSfuDisconnect(message));
+
+    // Roster mit den SFU-Liveness-Keys abgleichen (Phase 14): Sessions ohne
+    // lebenden Medien-Peer räumen – multi-instanz- und crash-fest. Ersetzt das
+    // frühere „beim Start ALLE Sessions löschen“, das in Multi-Instanz die
+    // Sessions noch verbundener Nutzer anderer Instanzen mitgerissen hätte.
+    await this.reconcileRoster();
+    this.reconcileTimer = setInterval(() => {
+      void this.reconcileRoster().catch((err: unknown) =>
+        this.logger.warn(`Voice-Roster-Abgleich fehlgeschlagen: ${String(err)}`),
+      );
+    }, RECONCILE_INTERVAL_MS);
+    this.reconcileTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer);
+  }
+
+  /**
+   * Gleicht den Postgres-Roster mit den SFU-Liveness-Keys ab und entfernt
+   * Sessions ohne lebenden Medien-Peer (mit Beitritts-Karenz). Kleine Tabelle
+   * (ein Eintrag pro Nutzer im Voice) – ein voller Scan ist hier unkritisch.
+   */
+  private async reconcileRoster(): Promise<void> {
+    const sessions = await this.prisma.voiceSession.findMany({
+      include: {
+        user: { select: { username: true } },
+        channel: { select: { serverId: true } },
+      },
+    });
+    if (sessions.length === 0) return;
+
+    const pipeline = this.redis.client.pipeline();
+    for (const s of sessions) pipeline.exists(VOICE_PEER_KEY_PREFIX + s.userId);
+    const results = (await pipeline.exec()) ?? [];
+
+    const graceCutoff = Date.now() - RECONCILE_JOIN_GRACE_MS;
+    let removed = 0;
+    for (let i = 0; i < sessions.length; i++) {
+      const session = sessions[i];
+      const alive = results[i]?.[1] === 1;
+      if (alive || session.joinedAt.getTime() > graceCutoff) continue;
+      await this.removeSession(session.channelId, session.userId, session.user.username);
+      removed += 1;
+    }
+    if (removed > 0) this.logger.log(`${removed} verwaiste Voice-Session(s) abgeglichen`);
   }
 
   /**

@@ -18,6 +18,8 @@ const AUTH_TIMEOUT_MS = 10_000;
 
 /** Wird über Redis publiziert, wenn die Medien-WS eines Nutzers endet. */
 export type DisconnectPublisher = (userId: string, channelId: string) => void;
+/** Markiert einen Peer als „lebt gerade“ (Liveness-Key in Redis, Phase 14). */
+export type PeerAliveMarker = (userId: string, channelId: string) => void;
 
 /**
  * Signaling-WebSocket des SFU. Pro Verbindung: erst `auth` (Voice-Token),
@@ -30,6 +32,7 @@ export class SignalingServer {
   constructor(
     private readonly mediasoup: MediasoupManager,
     private readonly publishDisconnect: DisconnectPublisher,
+    private readonly markPeerAlive: PeerAliveMarker,
   ) {}
 
   /** Eigener HTTP-Server (damit ws und ein Health-Endpunkt koexistieren). */
@@ -107,6 +110,9 @@ export class SignalingServer {
 
     const peer = new Peer(socket, claims.sub, claims.username, claims.channelId);
     room.peers.set(peer.id, peer);
+    // Liveness sofort markieren (Phase 14), damit der API-Reconcile diese frische
+    // Session nicht als verwaist einstuft, bevor der erste Heartbeat läuft.
+    this.markPeerAlive(peer.userId, peer.channelId);
     send(socket, { op: 'welcome', peerId: peer.id, userId: peer.userId });
     return peer;
   }

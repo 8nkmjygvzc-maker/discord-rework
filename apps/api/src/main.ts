@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import type { Server } from 'node:http';
@@ -8,7 +9,15 @@ import { AppModule } from './app.module';
 import { GatewayService } from './gateway/gateway.service';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Hinter einem Reverse-Proxy (Phase 14): TRUST_PROXY setzen, damit Express
+  // `req.ip` aus X-Forwarded-For nimmt – sonst drosselt das Rate-Limit alle
+  // Nutzer gemeinsam unter der Proxy-IP. Wert = Hop-Zahl (z. B. `1`) oder ein
+  // von Express akzeptierter Ausdruck; im Dev ohne Proxy bleibt es aus.
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy) {
+    app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
+  }
   // Alle REST-Routen unter /api – so kann der Web-Client im Dev-Modus
   // per Vite-Proxy und in Produktion per Reverse-Proxy ohne CORS arbeiten.
   app.setGlobalPrefix('api');

@@ -61,6 +61,21 @@ export class MediasoupManager {
     return this.rooms.get(channelId);
   }
 
+  /**
+   * Alle aktuell verbundenen Peers über alle Räume (Phase 14). Grundlage für die
+   * Liveness-Heartbeats in Redis, mit denen der API-Roster verwaiste
+   * VoiceSessions erkennt – ohne den destruktiven „beim Start alles löschen“-Weg.
+   */
+  livePeers(): { userId: string; channelId: string }[] {
+    const peers: { userId: string; channelId: string }[] = [];
+    for (const room of this.rooms.values()) {
+      for (const peer of room.peers.values()) {
+        peers.push({ userId: peer.userId, channelId: peer.channelId });
+      }
+    }
+    return peers;
+  }
+
   /** Liefert den Raum eines Kanals; legt ihn (inkl. Router) bei Bedarf an. */
   async getOrCreateRoom(channelId: string): Promise<Room> {
     const existing = this.rooms.get(channelId);

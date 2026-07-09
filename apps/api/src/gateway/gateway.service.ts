@@ -146,10 +146,9 @@ export class GatewayService implements OnModuleDestroy {
     // Mitglieder gemeinsamer Server und DM-Gesprächspartner – kein globaler
     // Broadcast an Fremde mehr.
     const visibleIds = await this.visibility.getVisibleUserIds(state.user.id);
-    const visible = new Set(visibleIds);
-    const onlineUsers = (await this.presence.getOnlineUsers()).filter(
-      (u) => u.id === state.user!.id || visible.has(u.id),
-    );
+    // Gezielt nur den Sichtbarkeitskreis (+ sich selbst) prüfen statt alle
+    // Online-Nutzer zu laden (Phase 14 – Skalierung).
+    const onlineUsers = await this.presence.filterOnline([...visibleIds, state.user.id]);
 
     this.send(state.socket, {
       op: GatewayOpcode.Dispatch,

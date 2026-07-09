@@ -193,8 +193,7 @@ export class ServersService {
     // Presence ist gescoped (Phase 7): Beitritt erweitert den Sichtbarkeits-
     // kreis, der READY-Snapshot ist aber vorbei → dem Beitretenden die
     // Online-Mitglieder nachliefern und ihn den Mitgliedern melden.
-    const memberSet = new Set(memberIds);
-    const onlineMembers = (await this.presence.getOnlineUsers()).filter((u) => memberSet.has(u.id));
+    const onlineMembers = await this.presence.filterOnline(memberIds);
     const joiner = onlineMembers.find((u) => u.id === userId);
     const others = onlineMembers.filter((u) => u.id !== userId);
     if (others.length > 0) {

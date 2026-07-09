@@ -234,7 +234,7 @@ export class FriendsService {
    * (Presence ist gescoped, READY-Snapshot ist vorbei) → einmalig nachliefern.
    */
   private async pushPresenceToEachOther(a: string, b: string): Promise<void> {
-    const online = await this.presence.getOnlineUsers();
+    const online = await this.presence.filterOnline([a, b]);
     const userA = online.find((u) => u.id === a);
     const userB = online.find((u) => u.id === b);
     if (userA)

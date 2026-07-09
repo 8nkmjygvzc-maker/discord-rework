@@ -8,6 +8,15 @@ import { SignalingServer } from './signaling';
 const VOICE_DISCONNECT_CHANNEL = 'voice:disconnect';
 /** Redis-Kanal, über den die API Voice-Trennungen anweist (Moderation, Phase 13). */
 const VOICE_FORCE_DISCONNECT_CHANNEL = 'voice:force-disconnect';
+/**
+ * Liveness-Keys (Phase 14): pro verbundenem Peer `voice:peer:{userId}` = channelId
+ * mit TTL. Der API-Roster nutzt sie, um verwaiste VoiceSessions zu erkennen
+ * (Multi-Instanz-fest, statt beim Start alle Sessions zu löschen).
+ */
+const VOICE_PEER_KEY_PREFIX = 'voice:peer:';
+/** TTL der Liveness-Keys; muss deutlich über dem Refresh-Intervall liegen. */
+const VOICE_PEER_TTL_S = 30;
+const VOICE_HEARTBEAT_MS = 10_000;
 
 async function bootstrap(): Promise<void> {
   const mediasoup = new MediasoupManager();
@@ -15,9 +24,24 @@ async function bootstrap(): Promise<void> {
 
   const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 3 });
 
-  const signaling = new SignalingServer(mediasoup, (userId, channelId) => {
-    void redis.publish(VOICE_DISCONNECT_CHANNEL, JSON.stringify({ userId, channelId }));
-  });
+  const markPeerAlive = (userId: string, channelId: string): void => {
+    void redis.set(VOICE_PEER_KEY_PREFIX + userId, channelId, 'EX', VOICE_PEER_TTL_S);
+  };
+
+  const signaling = new SignalingServer(
+    mediasoup,
+    (userId, channelId) => {
+      void redis.publish(VOICE_DISCONNECT_CHANNEL, JSON.stringify({ userId, channelId }));
+    },
+    markPeerAlive,
+  );
+
+  // Heartbeat: die Liveness-Keys aller verbundenen Peers regelmäßig erneuern,
+  // damit sie nicht ablaufen und der API-Roster sie als lebend erkennt (Phase 14).
+  const heartbeat = setInterval(() => {
+    for (const peer of mediasoup.livePeers()) markPeerAlive(peer.userId, peer.channelId);
+  }, VOICE_HEARTBEAT_MS);
+  heartbeat.unref();
 
   // Eigene Verbindung zum Abonnieren (eine Redis-Verbindung im Subscribe-Modus
   // kann nicht publishen). Auf Moderations-Trennungen der API reagieren.
@@ -49,6 +73,7 @@ async function bootstrap(): Promise<void> {
   });
 
   const shutdown = (): void => {
+    clearInterval(heartbeat);
     signaling.close();
     void mediasoup.close();
     void redis.quit();
