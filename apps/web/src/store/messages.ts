@@ -286,10 +286,19 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
   retryUndecrypted: () => {
     const { byChannel } = get();
     const pending = Object.values(byChannel).flatMap((chan) => chan.messages);
+    // Live-Nachzügler nie geöffneter Kanäle mitversuchen (s. pendingLive).
+    const known = new Set(pending.map((m) => m.id));
+    for (const message of pendingLive.values()) {
+      if (!known.has(message.id)) pending.push(message);
+    }
     void decryptBatch(pending, set, get, false);
   },
 
-  reset: () => set({ byChannel: {}, decrypted: {}, reactions: {} }),
+  reset: () => {
+    // Sonst gälten nach einem Re-Login alte History-Nachrichten als „live“.
+    pendingLive.clear();
+    set({ byChannel: {}, decrypted: {}, reactions: {} });
+  },
 }));
 
 type Set = (fn: (s: MessagesState) => Partial<MessagesState>) => void;
@@ -300,10 +309,13 @@ type Get = () => MessagesState;
  * Nachricht und Sender-Key-Umschlag treffen praktisch gleichzeitig ein, die
  * Live-Entschlüsselung verliert das Rennen. Gelingt sie später über
  * retryUndecrypted (live=false), sollen die Live-Effekte – DM-Ungelesen-Zähler
- * und Erwähnungs-Benachrichtigung – trotzdem laufen. Der Deckel schützt vor
- * unbegrenztem Wachstum durch nie entschlüsselbare Events.
+ * und Erwähnungs-Benachrichtigung – trotzdem laufen. Die ganze MessageInfo
+ * (nicht nur die ID) wird gemerkt, weil Nachrichten NIE geöffneter Kanäle
+ * nicht in `byChannel` landen – der Normalfall bei DMs – und retryUndecrypted
+ * sie sonst nirgends wiederfände. Der Deckel schützt vor unbegrenztem
+ * Wachstum durch nie entschlüsselbare Events.
  */
-const pendingLiveIds = new Set<string>();
+const pendingLive = new Map<string, MessageInfo>();
 const PENDING_LIVE_LIMIT = 500;
 
 /**
@@ -324,17 +336,17 @@ async function decryptBatch(
     const plaintext = await e2ee.decryptMessage(message);
     if (plaintext === null) {
       if (live) {
-        pendingLiveIds.add(message.id);
-        if (pendingLiveIds.size > PENDING_LIVE_LIMIT) {
-          const oldest = pendingLiveIds.values().next().value;
-          if (oldest !== undefined) pendingLiveIds.delete(oldest);
+        pendingLive.set(message.id, message);
+        if (pendingLive.size > PENDING_LIVE_LIMIT) {
+          const oldest = pendingLive.keys().next().value;
+          if (oldest !== undefined) pendingLive.delete(oldest);
         }
       }
       continue;
     }
     const content = decodeMessageContent(plaintext);
     results.push({ message, content });
-    if (live || pendingLiveIds.delete(message.id)) liveResults.push({ message, content });
+    if (live || pendingLive.delete(message.id)) liveResults.push({ message, content });
   }
   if (results.length === 0) return;
 

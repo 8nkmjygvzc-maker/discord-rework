@@ -10,11 +10,13 @@ interface ModalProps {
 export default function Modal({ title, onClose, children }: ModalProps) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
+      {/* max-h + overflow: hohe Dialoge (z. B. Rollen) scrollen intern, statt
+          über den Viewport hinaus abgeschnitten zu werden. */}
       <div
-        className="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-800 p-6 shadow-xl"
+        className="chat-scrollbar max-h-full w-full max-w-sm overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-800 p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">

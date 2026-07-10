@@ -68,8 +68,11 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-900 text-zinc-100">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-800 p-8 shadow-xl">
+    // h-full + m-auto statt min-h-screen + items-center: html/body/#root sind
+    // overflow:hidden (Phase 15) – zentriert per Auto-Margin bleibt Inhalt, der
+    // höher als der Viewport ist, scrollbar statt oben abgeschnitten.
+    <div className="flex h-full overflow-y-auto bg-zinc-900 p-4 text-zinc-100">
+      <div className="m-auto w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-800 p-8 shadow-xl">
         {onBack && (
           <button
             type="button"

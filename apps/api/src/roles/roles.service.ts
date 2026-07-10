@@ -40,9 +40,9 @@ export class RolesService {
     const updated = await this.prisma.role.update({
       where: { id: roleId },
       data: {
-        // Die Standardrolle behält ihren Namen – sie repräsentiert „alle Mitglieder“.
+        // Die Standardrolle behält Name und Farbe – sie repräsentiert „alle Mitglieder“.
         name: role.isDefault ? undefined : dto.name,
-        color: dto.color,
+        color: role.isDefault ? undefined : dto.color,
         position: role.isDefault ? undefined : dto.position,
         permissions:
           dto.permissions !== undefined

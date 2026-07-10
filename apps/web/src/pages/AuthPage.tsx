@@ -42,8 +42,11 @@ export default function AuthPage() {
     'placeholder-zinc-500 focus:border-indigo-500 focus:outline-none';
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-900 text-zinc-100">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-800 p-8 shadow-xl">
+    // h-full + m-auto statt min-h-screen + items-center: html/body/#root sind
+    // overflow:hidden (Phase 15) – zentriert per Auto-Margin bleibt Inhalt, der
+    // höher als der Viewport ist, scrollbar statt oben abgeschnitten.
+    <div className="flex h-full overflow-y-auto bg-zinc-900 p-4 text-zinc-100">
+      <div className="m-auto w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-800 p-8 shadow-xl">
         <h1 className="text-3xl font-bold tracking-tight">Parley</h1>
         <p className="mt-1 text-sm text-zinc-400">
           {mode === 'login' ? 'Willkommen zurück!' : 'Konto erstellen'}
