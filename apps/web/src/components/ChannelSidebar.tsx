@@ -264,12 +264,19 @@ function VoiceParticipant({
   const deafened = isSelf ? selfDeafened : state.deafened;
   const cameraOn = isSelf ? selfCameraOn : state.cameraOn;
   const screenOn = isSelf ? selfScreenOn : state.screenOn;
+  // Sprech-Erkennung (Phase 15): grüner Ring um den Avatar, solange der Nutzer spricht.
+  const speaking = useVoiceStore((s) => s.speaking[state.userId] === true);
   return (
     <li className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-zinc-400">
-      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700/70 text-[10px] font-bold text-white">
+      <span
+        title={speaking ? 'Spricht' : undefined}
+        className={`flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700/70 text-[10px] font-bold text-white ${
+          speaking ? 'ring-2 ring-emerald-400' : ''
+        }`}
+      >
         {state.username.slice(0, 1).toUpperCase()}
       </span>
-      <span className="truncate">{state.username}</span>
+      <span className={`truncate ${speaking ? 'text-zinc-100' : ''}`}>{state.username}</span>
       <span className="ml-auto flex items-center gap-0.5">
         {screenOn && <span title="Teilt den Bildschirm">🖥️</span>}
         {cameraOn && <span title="Kamera an">📹</span>}

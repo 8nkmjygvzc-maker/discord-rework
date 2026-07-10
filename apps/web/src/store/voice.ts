@@ -39,6 +39,8 @@ interface VoiceStoreState {
   voiceStates: VoiceState[];
   /** Aktive Video-Streams (eigene + fremde) für die Video-Bühne. */
   videoTiles: VideoTile[];
+  /** Wer gerade spricht (userId → true), aus der WebAudio-Pegelmessung (Phase 15). */
+  speaking: Record<string, boolean>;
 
   setVoiceStates: (states: VoiceState[]) => void;
   handleVoiceStateUpdate: (d: VoiceStateUpdatePayload) => void;
@@ -78,6 +80,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   error: null,
   voiceStates: [],
   videoTiles: [],
+  speaking: {},
 
   setVoiceStates: (states) => set({ voiceStates: states }),
 
@@ -109,6 +112,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       selfCameraOn: false,
       selfScreenOn: false,
       videoTiles: [],
+      speaking: {},
     });
 
     try {
@@ -129,6 +133,14 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
           else set({ selfScreenOn: false });
           void get().syncState();
         },
+        onSpeakingChanged: (userId, speaking) =>
+          set((s) => {
+            if ((s.speaking[userId] === true) === speaking) return s;
+            const next = { ...s.speaking };
+            if (speaking) next[userId] = true;
+            else delete next[userId];
+            return { speaking: next };
+          }),
       });
       await client.connect(res.voiceUrl, res.voiceToken);
       // Nur weitermachen, wenn der Nutzer nicht in der Zwischenzeit getrennt hat.
@@ -149,6 +161,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
         status: 'error',
         activeChannelId: null,
         videoTiles: [],
+        speaking: {},
         error: err instanceof Error ? err.message : 'Verbindung fehlgeschlagen',
       });
     }
@@ -167,6 +180,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       selfScreenOn: false,
       hasMic: false,
       videoTiles: [],
+      speaking: {},
     });
     if (channelId) {
       await authFetch<void>(`/api/voice/channels/${channelId}/leave`, { method: 'POST' }).catch(
@@ -252,6 +266,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       selfScreenOn: false,
       hasMic: false,
       videoTiles: [],
+      speaking: {},
     });
   },
 
@@ -298,6 +313,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       error: null,
       voiceStates: [],
       videoTiles: [],
+      speaking: {},
     });
   },
 }));

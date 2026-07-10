@@ -38,6 +38,75 @@ interface VoiceCallbacks {
    * beenden“ im Browser oder Gerät entfernt) → Store aktualisiert das Roster.
    */
   onLocalVideoEnded: (source: 'cam' | 'screen') => void;
+  /** Sprech-Erkennung: Nutzer hat angefangen/aufgehört zu sprechen (Phase 15). */
+  onSpeakingChanged: (userId: string, speaking: boolean) => void;
+}
+
+/**
+ * Sprech-Erkennung per WebAudio (Phase 15): misst den RMS-Pegel eines
+ * Audio-Tracks (eigenes Mikrofon oder fremder Consumer) über einen AnalyserNode
+ * und meldet Übergänge spricht/spricht-nicht. Schwelle mit Haltezeit gegen
+ * Flackern bei kurzen Sprechpausen. Läuft rein clientseitig – der SFU wird
+ * nicht gefragt (kein AudioLevelObserver nötig).
+ */
+const SPEAKING_RMS_THRESHOLD = 0.015; // ≈ −36 dBFS – leise Sprache liegt darüber
+const SPEAKING_HOLD_MS = 500; // so lange bleibt „spricht“ nach dem letzten Pegel stehen
+const SPEAKING_POLL_MS = 120;
+
+export class SpeakingDetector {
+  private readonly source: MediaStreamAudioSourceNode;
+  private readonly analyser: AnalyserNode;
+  // Explizit <ArrayBuffer>: getFloatTimeDomainData akzeptiert kein SharedArrayBuffer-Backing.
+  private readonly buf: Float32Array<ArrayBuffer>;
+  private readonly timer: number;
+  private lastLoudAt = 0;
+  private speaking = false;
+  private enabled = true;
+
+  constructor(
+    ctx: AudioContext,
+    track: MediaStreamTrack,
+    private readonly onChange: (speaking: boolean) => void,
+  ) {
+    this.source = ctx.createMediaStreamSource(new MediaStream([track]));
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.source.connect(this.analyser);
+    this.buf = new Float32Array(this.analyser.fftSize);
+    this.timer = window.setInterval(() => this.poll(), SPEAKING_POLL_MS);
+  }
+
+  /** false = Erkennung aussetzen (eigenes Mikro stumm) und „spricht“ löschen. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.lastLoudAt = 0;
+      this.update(false);
+    }
+  }
+
+  stop(): void {
+    window.clearInterval(this.timer);
+    this.source.disconnect();
+    this.update(false);
+  }
+
+  private poll(): void {
+    if (!this.enabled) return;
+    this.analyser.getFloatTimeDomainData(this.buf);
+    let sum = 0;
+    for (let i = 0; i < this.buf.length; i++) sum += this.buf[i] * this.buf[i];
+    const rms = Math.sqrt(sum / this.buf.length);
+    const now = performance.now();
+    if (rms >= SPEAKING_RMS_THRESHOLD) this.lastLoudAt = now;
+    this.update(this.lastLoudAt !== 0 && now - this.lastLoudAt <= SPEAKING_HOLD_MS);
+  }
+
+  private update(speaking: boolean): void {
+    if (speaking === this.speaking) return;
+    this.speaking = speaking;
+    this.onChange(speaking);
+  }
 }
 
 let ridSeq = 1;
@@ -64,6 +133,10 @@ export class VoiceClient {
     number,
     { resolve: (d: unknown) => void; reject: (e: Error) => void }
   >();
+  /** Sprech-Erkennung pro Audio-Quelle ('self' bzw. consumerId). */
+  private readonly speakingDetectors = new Map<string, SpeakingDetector>();
+  private audioCtx: AudioContext | null = null;
+  private resumeHandler: (() => void) | null = null;
   private deafened = false;
   private closed = false;
 
@@ -109,6 +182,9 @@ export class VoiceClient {
     if (!this.micProducer) return;
     if (paused) this.micProducer.pause();
     else this.micProducer.resume();
+    // Pausieren stoppt den Track nicht – die Sprech-Erkennung explizit aussetzen,
+    // sonst leuchtete man beim Reden trotz Stummschaltung als „spricht“ auf.
+    this.speakingDetectors.get('self')?.setEnabled(!paused);
     try {
       await this.rpc(paused ? 'pauseProducer' : 'resumeProducer', {
         producerId: this.micProducer.id,
@@ -173,6 +249,13 @@ export class VoiceClient {
 
   disconnect(): void {
     this.closed = true;
+    for (const d of this.speakingDetectors.values()) d.stop();
+    this.speakingDetectors.clear();
+    this.removeResumeHandler();
+    if (this.audioCtx) {
+      void this.audioCtx.close().catch(() => undefined);
+      this.audioCtx = null;
+    }
     this.micTrack?.stop();
     this.camTrack?.stop();
     this.screenTrack?.stop();
@@ -233,6 +316,7 @@ export class VoiceClient {
           track: this.micTrack,
           appData: { source: 'mic' satisfies VoiceSource },
         });
+        this.attachSpeaking('self', this.micTrack, this.cb.self.userId);
       }
     } catch {
       // Kein Mikrofon/keine Berechtigung → Zuhörer-Modus. Nicht fatal.
@@ -302,6 +386,7 @@ export class VoiceClient {
         this.emitTiles();
       } else {
         this.playAudio(consumer.id, consumer.track);
+        this.attachSpeaking(consumer.id, consumer.track, info.userId);
       }
       await this.rpc('resumeConsumer', { consumerId: consumer.id });
     } catch {
@@ -322,6 +407,63 @@ export class VoiceClient {
     this.audioEls.set(consumerId, el);
   }
 
+  /** Sprech-Erkennung an einen Audio-Track hängen (best effort, nie fatal). */
+  private attachSpeaking(key: string, track: MediaStreamTrack, userId: string): void {
+    const ctx = this.ensureAudioContext();
+    if (!ctx) return;
+    try {
+      const detector = new SpeakingDetector(ctx, track, (speaking) =>
+        this.cb.onSpeakingChanged(userId, speaking),
+      );
+      this.speakingDetectors.set(key, detector);
+    } catch {
+      // Track nicht analysierbar → Indikator bleibt für diesen Nutzer einfach aus.
+    }
+  }
+
+  /**
+   * Gemeinsamer AudioContext für alle Pegelmesser. Die Autoplay-Policy kann ihn
+   * ohne Nutzergeste suspendieren – dann wird beim nächsten Klick/Tastendruck
+   * ein Resume nachgeholt (der Beitritt selbst ist zwar ein Klick, aber die
+   * Geste kann durch die async-Kette bereits verfallen sein).
+   */
+  private ensureAudioContext(): AudioContext | null {
+    if (this.closed) return null;
+    if (!this.audioCtx) {
+      try {
+        this.audioCtx = new AudioContext();
+      } catch {
+        return null; // Ohne WebAudio keine Sprech-Erkennung – nicht fatal.
+      }
+    }
+    if (this.audioCtx.state === 'suspended') {
+      void this.audioCtx.resume().catch(() => undefined);
+      if (!this.resumeHandler) {
+        this.resumeHandler = () => {
+          const ctx = this.audioCtx;
+          if (!ctx || ctx.state !== 'suspended') {
+            this.removeResumeHandler();
+            return;
+          }
+          void ctx
+            .resume()
+            .then(() => this.removeResumeHandler())
+            .catch(() => undefined);
+        };
+        document.addEventListener('pointerdown', this.resumeHandler);
+        document.addEventListener('keydown', this.resumeHandler);
+      }
+    }
+    return this.audioCtx;
+  }
+
+  private removeResumeHandler(): void {
+    if (!this.resumeHandler) return;
+    document.removeEventListener('pointerdown', this.resumeHandler);
+    document.removeEventListener('keydown', this.resumeHandler);
+    this.resumeHandler = null;
+  }
+
   private closeConsumerByProducer(producerId: string): void {
     this.producerMeta.delete(producerId);
     let videoChanged = false;
@@ -335,6 +477,11 @@ export class VoiceClient {
         el.srcObject = null;
         el.remove();
         this.audioEls.delete(id);
+      }
+      const detector = this.speakingDetectors.get(id);
+      if (detector) {
+        detector.stop(); // meldet ggf. speaking=false, bevor der Nutzer verschwindet
+        this.speakingDetectors.delete(id);
       }
       if (this.remoteVideo.delete(id)) videoChanged = true;
     }
