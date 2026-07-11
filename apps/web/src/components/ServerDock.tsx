@@ -17,9 +17,15 @@ interface ServerDockProps {
 
 /**
  * Unten mittig zentriertes Dock: links fix der Freunde-Tab, rechts fix der
- * kombinierte Erstellen/Beitreten-Button, dazwischen 5 Server-Slots. Bei mehr
- * als 5 Servern verschiebt die Scroll-Leiste im Bogen darunter das sichtbare
- * Fenster (auch per Mausrad über dem Dock).
+ * kombinierte Erstellen/Beitreten-Button, dazwischen 5 Server-Slots. Kein
+ * Panel-Hintergrund – nur die frei schwebenden Icons. Bei mehr als 5 Servern
+ * verschiebt man das sichtbare Fenster, indem man die Server-Kreise mit der
+ * Maus horizontal zieht (oder per Mausrad über dem Dock).
+ *
+ * Das Dock ist standardmäßig verborgen und slidet erst hoch, wenn die Maus
+ * unten in die Bildschirmmitte fährt (unsichtbare Auslöse-Zone). Es liegt als
+ * Overlay über dem Inhalt – in der Server-Ansicht also über dem Chat – und
+ * fährt wieder runter, sobald die Maus es verlässt.
  */
 export default function ServerDock({
   homeActive,
@@ -38,9 +44,34 @@ export default function ServerDock({
   // Erster sichtbarer Server-Index (Fenster der Größe SLOTS).
   const [offset, setOffset] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Dock eingeblendet? Wird über die Mausposition (Zone unten mittig) gesteuert.
+  const [visible, setVisible] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
 
   const maxOffset = Math.max(0, servers.length - SLOTS);
+
+  // Globale Mausverfolgung: einblenden, wenn der Cursor unten mittig ankommt;
+  // ausblenden, sobald er das Dock-Areal wieder verlässt (außer Menü ist offen).
+  // Bewusst nicht über mouseenter/-leave gelöst – das feuert nicht zuverlässig,
+  // z. B. wenn die Maus das Fenster verlässt.
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      const inTriggerZone =
+        e.clientY >= window.innerHeight - 16 && Math.abs(e.clientX - window.innerWidth / 2) <= 280;
+      if (inTriggerZone) {
+        setVisible(true);
+        return;
+      }
+      if (menuOpen) return;
+      const rect = navRef.current?.getBoundingClientRect();
+      const overDock =
+        !!rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top - 8;
+      if (!overDock) setVisible(false);
+    }
+    window.addEventListener('mousemove', onMouseMove);
+    return () => window.removeEventListener('mousemove', onMouseMove);
+  }, [menuOpen]);
 
   // Fenster im gültigen Bereich halten, wenn Server wegfallen.
   useEffect(() => {
@@ -86,8 +117,13 @@ export default function ServerDock({
 
   return (
     <nav
+      ref={navRef}
       onWheel={handleWheel}
-      className="relative z-20 flex shrink-0 justify-center bg-zinc-950 pt-3"
+      // Tastatur-Fokus (Tab) blendet das Dock ebenfalls ein.
+      onFocusCapture={() => setVisible(true)}
+      className={`absolute bottom-0 left-1/2 z-40 -translate-x-1/2 rounded-t-3xl border border-b-0 border-zinc-800 bg-zinc-950/95 px-8 pt-3 shadow-2xl backdrop-blur transition-transform duration-300 ease-out ${
+        visible ? 'translate-y-0' : 'translate-y-full'
+      }`}
       data-testid="server-dock"
     >
       <div className="flex flex-col items-center">

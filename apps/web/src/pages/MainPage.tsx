@@ -68,7 +68,7 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
   const showHome = home || (loaded && servers.length === 0);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-zinc-800 text-zinc-100">
+    <div className="relative flex h-screen flex-col overflow-hidden bg-zinc-800 text-zinc-100">
       <div className="flex min-h-0 min-w-0 flex-1">
         {showHome ? (
           <HomeView
