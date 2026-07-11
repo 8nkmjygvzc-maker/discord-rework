@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useServersStore } from '../store/servers';
 import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
-import ServerRail from '../components/ServerRail';
+import ServerDock from '../components/ServerDock';
 import ChannelSidebar from '../components/ChannelSidebar';
 import MembersPanel from '../components/MembersPanel';
 import ChatView from '../components/ChatView';
@@ -68,8 +68,43 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
   const showHome = home || (loaded && servers.length === 0);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-zinc-800 text-zinc-100">
-      <ServerRail
+    <div className="flex h-screen flex-col overflow-hidden bg-zinc-800 text-zinc-100">
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {showHome ? (
+          <HomeView
+            onOpenProfile={onOpenProfile}
+            onCreateServer={() => setDialog('createServer')}
+            onJoinServer={() => setDialog('joinServer')}
+          />
+        ) : (
+          <>
+            <ChannelSidebar
+              onCreateChannel={(type) => {
+                setChannelType(type);
+                setDialog('createChannel');
+              }}
+              onOpenProfile={onOpenProfile}
+              onOpenRoles={() => setDialog('roles')}
+              onOpenInvite={() => setDialog('invite')}
+            />
+
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <VoiceStage />
+              {channel ? (
+                <ChatView channel={channel} />
+              ) : (
+                <main className="flex flex-1 items-center justify-center text-zinc-500">
+                  Wähle einen Kanal
+                </main>
+              )}
+            </div>
+
+            <MembersPanel />
+          </>
+        )}
+      </div>
+
+      <ServerDock
         homeActive={showHome}
         onSelectHome={() => setHome(true)}
         onSelectServer={(serverId) => {
@@ -79,39 +114,6 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
         onCreateServer={() => setDialog('createServer')}
         onJoinServer={() => setDialog('joinServer')}
       />
-
-      {showHome ? (
-        <HomeView
-          onOpenProfile={onOpenProfile}
-          onCreateServer={() => setDialog('createServer')}
-          onJoinServer={() => setDialog('joinServer')}
-        />
-      ) : (
-        <>
-          <ChannelSidebar
-            onCreateChannel={(type) => {
-              setChannelType(type);
-              setDialog('createChannel');
-            }}
-            onOpenProfile={onOpenProfile}
-            onOpenRoles={() => setDialog('roles')}
-            onOpenInvite={() => setDialog('invite')}
-          />
-
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <VoiceStage />
-            {channel ? (
-              <ChatView channel={channel} />
-            ) : (
-              <main className="flex flex-1 items-center justify-center text-zinc-500">
-                Wähle einen Kanal
-              </main>
-            )}
-          </div>
-
-          <MembersPanel />
-        </>
-      )}
 
       {dialog === 'createServer' && (
         <CreateServerDialog onClose={() => setDialog(null)} onSuccess={() => setHome(false)} />
