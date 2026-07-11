@@ -2,7 +2,7 @@
 
 Eigenständige, Ende-zu-Ende-verschlüsselte Chat-/Voice-/Video-Plattform im Funktionsumfang von Discord – eigenes Backend, eigenes Protokoll, keine Discord-API.
 
-Der vollständige Arbeitsauftrag steht in [CLAUDE.md](CLAUDE.md), der Projektfortschritt in [PROGRESS.md](PROGRESS.md), offene Punkte in [ROADMAP.md](ROADMAP.md).
+Der vollständige Arbeitsauftrag steht in [CLAUDE.md](CLAUDE.md), der Projektfortschritt in [PROGRESS.md](PROGRESS.md), offene Punkte in [ROADMAP.md](ROADMAP.md). Das Deployment auf einen VPS (GitHub Actions → GHCR → Docker Compose) ist in [DEPLOY.md](DEPLOY.md) beschrieben.
 
 ## Struktur
 
@@ -14,7 +14,8 @@ Der vollständige Arbeitsauftrag steht in [CLAUDE.md](CLAUDE.md), der Projektfor
 /packages
   /shared     gemeinsame Typen, Opcode-Definitionen, Krypto-Utils
 /infra
-  docker-compose.yml   PostgreSQL, Redis, MinIO
+  docker-compose.yml        PostgreSQL, Redis, MinIO (lokale Entwicklung)
+  docker-compose.prod.yml   Produktions-Stack für den VPS (siehe DEPLOY.md)
 ```
 
 ## Voraussetzungen

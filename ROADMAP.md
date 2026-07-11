@@ -10,11 +10,12 @@ Weitere** – die offenen Punkte unten sind bewusste, dokumentierte Entscheidung
 keine vergessenen Reste. Die wichtigsten Blöcke vor den jeweils nächsten
 Meilensteinen:
 
-- **Vor einem echten Deployment (auch privat):** Dev-Passwörter in
-  `infra/docker-compose.yml`/`.env` durch echte Secrets ersetzen, TLS für
-  MinIO bzw. am Reverse-Proxy, `TRUST_PROXY` setzen, VAPID-Keys pro Umgebung,
-  History-Fallback für `/invite/<code>` am Static-Host, `MEDIASOUP_ANNOUNCED_IP`
-  konfigurieren (Details in den Abschnitten unten)
+- **Vor einem echten Deployment (auch privat):** ✓ technisch vorbereitet
+  (11.07.2026, siehe [DEPLOY.md](DEPLOY.md)): Dockerfiles + `infra/docker-compose.prod.yml`
+  + GitHub-Actions-Workflow decken Secrets aus `.env`, `TRUST_PROXY`, VAPID pro
+  Umgebung, SPA-Fallback (nginx `try_files`) und `MEDIASOUP_ANNOUNCED_IP` ab;
+  TLS terminiert der Reverse Proxy auf dem VPS. Offen sind nur die einmaligen
+  Schritte auf dem Server (DEPLOY.md Schritte 1–5)
 - **Vor echtem Mehrbenutzer-Betrieb:** E-Mail-Verifizierung + Passwort-Reset,
   2FA, Rollen-Verwaltungs-Hierarchie, Upload-Quota, Lasttests
 - **Vor einem öffentlichen Launch:** endgültiges Branding (statt „Parley“),
@@ -42,6 +43,7 @@ Meilensteinen:
 
 ## Technische Schulden / Vereinfachungen
 
+- **DB-Migrationen laufen beim API-Containerstart** (`prisma migrate deploy` im CMD des api-Images, Deployment 11.07.2026): einfach und für EINE API-Instanz korrekt. Sobald mehrere API-Instanzen laufen (Phase-14-Skalierung), den Migrationsschritt in einen separaten Deploy-Schritt/Job auslagern, damit nicht mehrere Instanzen gleichzeitig migrieren. Rollback per `IMAGE_TAG` rollt Migrationen nicht zurück
 - `@parley/shared` wird als CommonJS gebaut; der Web-Client umgeht das per Vite-Alias direkt auf die TS-Quelle (Rollup kann CJS-Enum-Re-Exports nicht statisch auflösen). Falls das später stört: Dual-Build (ESM+CJS)
 - npm 10.9.8 gebündelt mit Node 22 – Update auf npm 11 optional
 - ~~Docker-Compose-Verifikation~~ ✓ nachgeholt (05.07.2026), ~~Vitest-Setup~~ ✓ mit Phase 1 erledigt

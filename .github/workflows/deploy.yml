@@ -1,0 +1,108 @@
+# Build & Deploy auf den VPS.
+#
+# Ablauf: 1) Die drei Images (api/voice/web) bauen und in die GitHub Container
+# Registry (GHCR) pushen. 2) Per SSH auf dem VPS die compose-Datei aktualisieren,
+# die neuen Images ziehen und den Stack neu starten.
+#
+# Benötigte Repository-Secrets (Settings → Secrets and variables → Actions):
+#   VPS_HOST     – IP oder Hostname des VPS
+#   VPS_USER     – SSH-Benutzer (Mitglied der docker-Gruppe)
+#   VPS_SSH_KEY  – privater SSH-Schlüssel (ed25519), Pubkey in authorized_keys
+#   VPS_PORT     – optional, SSH-Port (Standard 22)
+# Die .env auf dem VPS (~/parley/.env) wird EINMALIG manuell angelegt – siehe DEPLOY.md.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DEPLOY_DIR: parley
+
+jobs:
+  build:
+    name: Build ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        app: [api, voice, web]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Bei GHCR anmelden
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR verlangt kleingeschriebene Image-Namen.
+      - name: Image-Namen ableiten
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/parley-${{ matrix.app }}" >> "$GITHUB_OUTPUT"
+
+      - name: Bauen und pushen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  deploy:
+    name: Deploy auf VPS
+    runs-on: ubuntu-latest
+    needs: build
+    # Nie zwei Deploys gleichzeitig; ein laufendes wird nicht abgebrochen.
+    concurrency:
+      group: vps-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose-Datei auf den VPS kopieren
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: infra/docker-compose.prod.yml
+          target: ~/${{ env.DEPLOY_DIR }}/
+          strip_components: 1
+
+      - name: Stack aktualisieren
+        uses: appleboy/ssh-action@v1
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: GHCR_TOKEN,GHCR_USER
+          script: |
+            set -e
+            cd ~/${{ env.DEPLOY_DIR }}
+            if [ ! -f .env ]; then
+              echo "FEHLER: ~/parley/.env fehlt auf dem VPS – siehe DEPLOY.md" >&2
+              exit 1
+            fi
+            # GITHUB_TOKEN ist während des Workflow-Laufs für GHCR-Pulls gültig.
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -f
+            docker compose -f docker-compose.prod.yml ps

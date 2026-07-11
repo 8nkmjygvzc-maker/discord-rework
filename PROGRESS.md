@@ -247,9 +247,21 @@ Selbst gebaut, inkrementell (kleine verifizierte Schritte). Erledigt bisher:
 
 **Verifiziert (Schritt 5, Browser gegen echte API + portable Infra):** Frischer Nutzer `p15opfer` (UI) + Owner-Skript `p15mod_…` (REST): Beitritt per Invite → Kick mit Grund → Hinweis-Dialog „Entfernt … Grund: Zu viel Spam im Testkanal“ erscheint live, Server verschwindet aus der Leiste; erneuter Beitritt → Bann mit Grund → Dialog „Gebannt … Grund: Wiederholter Regelverstoss“; erneuter Invite-Einlöse-Versuch → serverseitig blockiert („Du bist von diesem Server gebannt“ im Dialog). ErrorBoundary: temporärer `throw` in `WelcomeView` → Fallback-UI mit Fehlertext und „Neu laden“ statt weißer Seite (danach entfernt, App normal). E2EE-Regression nach dem Init-Umbau: neue Nachricht in frischem Server wird verschlüsselt gesendet (DB: nur Ciphertext, kein Klartext-Fund), übersteht Reload lesbar; Konsole in frischem Tab komplett sauber (der Init-TypeError trat vorher bei jedem Load auf). Build (4 Workspaces)/Tests (11 API + 21 shared)/Lint/Format grün.
 
+### Deployment: VPS via GitHub Actions + GHCR (11.07.2026, nach Phase 15)
+
+Auf Arians Wunsch: automatisches Deployment auf seinen VPS (dort läuft bereits eine andere Website; Setup so gebaut, dass sie unberührt bleibt).
+
+- **Dockerfiles** für alle drei Dienste (Build-Kontext = Repo-Root wegen npm-Workspaces): `apps/api` (Prisma generate → nest build → `npm prune --omit=dev` → generate erneut, da prune `.prisma` entfernt; Start via `prisma migrate deploy && node dist/main.js`), `apps/voice` (mediasoup, vorgebauter Worker), `apps/web` (Vite-Build → nginx:alpine). Dazu `.dockerignore` (wichtig: `**/*.tsbuildinfo`, sonst überspringt tsc den Emit)
+- **`prisma` (CLI) ist jetzt Prod-Dependency der API** – das Laufzeit-Image braucht sie für `migrate deploy` beim Containerstart
+- **`apps/web/nginx.conf`:** Web-Container ist einziger HTTP-Einstiegspunkt – SPA + Proxy auf `/api`, `/gateway`, `/voice` (WebSocket-Upgrade via `map $http_upgrade`), `client_max_body_size 12m`, Cache-Header (index.html no-cache, /assets immutable)
+- **`infra/docker-compose.prod.yml`:** Postgres/Redis/MinIO nur im internen Netz, Web an `${WEB_BIND:-127.0.0.1:8080}`, Voice veröffentlicht die RTC-Range UDP/TCP 40000–40100 1:1, Healthchecks über `node -e "fetch(...)"`; Vorlage `infra/.env.production.example`
+- **`.github/workflows/deploy.yml`:** Push auf `main` (oder manuell) → 3 Images per Matrix bauen → GHCR (`ghcr.io/8nkmjygvzc-maker/parley-{api,voice,web}`, Tags `latest` + Git-SHA, GHA-Layer-Cache) → per SSH (appleboy-Actions) compose-Datei nach `~/parley/` kopieren, `docker compose pull && up -d`. Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, optional `VPS_PORT`; GHCR-Pull auf dem VPS läuft über das Workflow-`GITHUB_TOKEN`
+- **`DEPLOY.md`:** komplette VPS-Anleitung (Bestandsaufnahme wegen der bestehenden Website, .env/Secrets, Firewall für die RTC-Ports, DNS, Reverse-Proxy-Varianten nginx/Proxy-Container/Caddy, Rollback über `IMAGE_TAG`=SHA, Backup-Hinweise)
+- **`.gitignore` bereinigt:** Datei enthielt committete Merge-Konflikt-Marker (`<<<<<<< HEAD` …) – neu zusammengeführt; `!.env.production.example` ergänzt, damit die Vorlage nicht vom `.env.*`-Muster ignoriert wird
+
 ## Nächste Schritte
 
-Der Phasenplan ist abgeschlossen. Alles Weitere steht priorisiert in [ROADMAP.md](ROADMAP.md) („Stand“-Abschnitt oben): zuerst die Deployment-Härtung (Secrets, TLS, Reverse-Proxy, VAPID, SPA-Fallback), wenn die App echte Nutzer bekommen soll.
+Der Phasenplan ist abgeschlossen. Alles Weitere steht priorisiert in [ROADMAP.md](ROADMAP.md) („Stand“-Abschnitt oben): zuerst die Deployment-Härtung (Secrets, TLS, Reverse-Proxy, VAPID, SPA-Fallback), wenn die App echte Nutzer bekommen soll. Die technische Grundlage dafür (CI/CD auf den VPS) steht – siehe [DEPLOY.md](DEPLOY.md); offen sind die einmaligen Schritte auf dem VPS selbst (Bestandsaufnahme, .env, Reverse Proxy, DNS, GitHub-Secrets).
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 

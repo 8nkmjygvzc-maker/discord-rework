@@ -1,0 +1,25 @@
+# Wird bei allen drei Image-Builds (api/voice/web) angewendet – der Build-Kontext
+# ist immer das Repo-Root, damit die npm-Workspaces vollständig verfügbar sind.
+
+node_modules
+**/node_modules
+
+# Build-Ausgaben werden im Container frisch erzeugt. *.tsbuildinfo unbedingt
+# ausschließen: eine alte Datei würde tsc glauben lassen, es sei schon gebaut.
+**/dist
+**/*.tsbuildinfo
+
+# Secrets niemals in den Build-Kontext lassen
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.claude
+infra
+scripts
+coverage
+*.log
+Thumbs.db
+.DS_Store

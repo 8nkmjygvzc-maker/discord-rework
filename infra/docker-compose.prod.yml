@@ -1,0 +1,145 @@
+# Produktions-Stack für den VPS. Wird vom GitHub-Actions-Workflow als
+# ~/parley/docker-compose.yml auf den Server kopiert; die Werte kommen aus
+# einer .env-Datei im selben Verzeichnis (Vorlage: .env.production.example).
+#
+# Architektur: Der Web-Container (nginx) ist der einzige HTTP-Einstiegspunkt –
+# er liefert die SPA aus und proxied /api, /gateway und /voice intern weiter.
+# Nach außen veröffentlicht werden nur:
+#   - ${WEB_BIND:-127.0.0.1:8080} → Web (davor gehört ein Reverse Proxy mit TLS)
+#   - UDP/TCP ${MEDIASOUP_MIN_PORT}-${MEDIASOUP_MAX_PORT} → WebRTC-Medienströme
+# Postgres/Redis/MinIO sind ausschließlich im internen Docker-Netz erreichbar.
+name: parley-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-parley}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ${IMAGE_PREFIX:-ghcr.io/8nkmjygvzc-maker/parley}-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: '3001'
+      # 2 Hops: äußerer Reverse Proxy (TLS) + nginx im Web-Container.
+      TRUST_PROXY: ${TRUST_PROXY:-2}
+      JWT_SECRET: ${JWT_SECRET:?}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-parley}
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: '9000'
+      MINIO_USE_SSL: 'false'
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-parley-attachments}
+      VOICE_PUBLIC_URL: /voice
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # node bringt fetch mit – kein curl/wget im Slim-Image nötig.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3001/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  voice:
+    image: ${IMAGE_PREFIX:-ghcr.io/8nkmjygvzc-maker/parley}-voice:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      VOICE_PORT: '3002'
+      JWT_SECRET: ${JWT_SECRET:?}
+      REDIS_URL: redis://redis:6379
+      MEDIASOUP_LISTEN_IP: 0.0.0.0
+      # Öffentliche IP des VPS – ohne sie finden Clients den SFU nicht (ICE).
+      MEDIASOUP_ANNOUNCED_IP: ${MEDIASOUP_ANNOUNCED_IP:?}
+      MEDIASOUP_MIN_PORT: ${MEDIASOUP_MIN_PORT:-40000}
+      MEDIASOUP_MAX_PORT: ${MEDIASOUP_MAX_PORT:-40100}
+    ports:
+      # RTC-Medienports 1:1 veröffentlichen (Container-Port = Host-Port),
+      # sonst stimmen die ICE-Kandidaten nicht. In der Firewall freigeben!
+      - '${MEDIASOUP_MIN_PORT:-40000}-${MEDIASOUP_MAX_PORT:-40100}:${MEDIASOUP_MIN_PORT:-40000}-${MEDIASOUP_MAX_PORT:-40100}/udp'
+      - '${MEDIASOUP_MIN_PORT:-40000}-${MEDIASOUP_MAX_PORT:-40100}:${MEDIASOUP_MIN_PORT:-40000}-${MEDIASOUP_MAX_PORT:-40100}/tcp'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3002/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web:
+    image: ${IMAGE_PREFIX:-ghcr.io/8nkmjygvzc-maker/parley}-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      # Bewusst nur an localhost binden – TLS und die öffentliche Erreichbarkeit
+      # übernimmt der Reverse Proxy auf dem Host (siehe DEPLOY.md).
+      - '${WEB_BIND:-127.0.0.1:8080}:80'
+    depends_on:
+      - api
+      - voice
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
