@@ -26,7 +26,7 @@ Der vollständige Arbeitsauftrag steht in [CLAUDE.md](CLAUDE.md), der Projektfor
     Start per `powershell -ExecutionPolicy Bypass -File scripts\dev-infra.ps1`
     (Einrichtung siehe PROGRESS.md, Abschnitt „Dev-Umgebung“)
 
-## Setup & Start
+## Setup (einmalig)
 
 ```bash
 # 1. Abhängigkeiten installieren
@@ -35,24 +35,34 @@ npm install
 # 2. Umgebungsvariablen anlegen (JWT_SECRET generieren!)
 copy .env.example .env
 
-# 3. Infrastruktur starten (Docker ODER portabel, s. o.)
-docker compose -f infra/docker-compose.yml up -d
-# bzw.:  powershell -ExecutionPolicy Bypass -File scripts\dev-infra.ps1
-
-# 4. DB-Schema anwenden und Prisma-Client generieren
+# 3. Prisma-Client generieren
 npm run prisma:generate
-npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
-
-# 5. Backend + Frontend im Dev-Modus (zwei Terminals)
-npm run build:shared
-npm run dev:api    # http://localhost:3001/api/health
-npm run dev:web    # http://localhost:5173
 ```
+
+## Start – ein Befehl
+
+```bash
+npm run dev
+```
+
+Das erledigt alles: `@parley/shared` bauen, Infrastruktur sicherstellen
+(läuft schon alles, passiert nichts; sonst Docker Compose oder – ohne
+Docker-Daemon – die portable Infra), Migrationen anwenden (`prisma migrate
+deploy`) und dann **API + Voice-SFU + Web parallel** mit gelabelter Ausgabe
+(`concurrently`, Strg+C beendet alle drei). Alternativ doppelklickbar:
+`scripts\dev.cmd`.
+
+- Web: http://localhost:5173 · API: http://localhost:3001/api/health · Voice-SFU: Port 3002
+
+Einzeln geht weiterhin: `npm run dev:api` / `npm run dev:voice` / `npm run dev:web`,
+Infrastruktur allein: `npm run dev:infra`.
 
 ## Nützliche Befehle
 
 | Befehl                    | Zweck                                 |
 | ------------------------- | ------------------------------------- |
+| `npm run dev`             | ALLES starten (Infra + api/voice/web) |
+| `npm run dev:infra`       | nur Infrastruktur sicherstellen       |
 | `npm run build`           | alles bauen (shared → api → web)      |
 | `npm test`                | Vitest in allen Workspaces            |
 | `npm run lint`            | ESLint über das gesamte Repo          |
