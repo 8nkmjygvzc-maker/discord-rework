@@ -410,8 +410,11 @@ export const useServersStore = create<ServersState>()((set, get) => ({
           const channels = s.selectedServer.channels.filter((c) => c.id !== channelId);
           return {
             selectedServer: { ...s.selectedServer, channels },
+            // Fallback nur auf Textkanäle (Voice-Kanäle öffnen keinen Chat).
             selectedChannelId:
-              s.selectedChannelId === channelId ? (channels[0]?.id ?? null) : s.selectedChannelId,
+              s.selectedChannelId === channelId
+                ? (channels.find((c) => c.type === 'TEXT')?.id ?? null)
+                : s.selectedChannelId,
           };
         });
         return;

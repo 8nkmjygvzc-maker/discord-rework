@@ -106,6 +106,9 @@ export default function ChannelSidebar({
               onAdd={() => onCreateChannel('TEXT')}
             />
             <ul className="mb-4 space-y-0.5">
+              {textChannels.length === 0 && (
+                <li className="px-2 py-1 text-xs text-zinc-600">Noch keine Textkanäle</li>
+              )}
               {textChannels.map((channel) => (
                 <li key={channel.id} className="group">
                   <button

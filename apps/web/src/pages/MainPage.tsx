@@ -81,7 +81,11 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
       />
 
       {showHome ? (
-        <HomeView onOpenProfile={onOpenProfile} />
+        <HomeView
+          onOpenProfile={onOpenProfile}
+          onCreateServer={() => setDialog('createServer')}
+          onJoinServer={() => setDialog('joinServer')}
+        />
       ) : (
         <>
           <ChannelSidebar

@@ -83,7 +83,7 @@ export default function ServerRail({
       </button>
       <button
         type="button"
-        title="Server beitreten (per ID)"
+        title="Server beitreten (mit Einladung)"
         onClick={onJoinServer}
         className="flex h-12 w-12 items-center justify-center rounded-3xl bg-zinc-800 text-lg text-emerald-400 transition-all hover:rounded-2xl hover:bg-emerald-600 hover:text-white"
       >

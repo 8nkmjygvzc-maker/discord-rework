@@ -1,22 +1,48 @@
+import { useState } from 'react';
 import type { ChannelInfo } from '@parley/shared';
 import { useDmsStore } from '../store/dms';
+import { useFriendsStore } from '../store/friends';
+import { useServersStore } from '../store/servers';
 import { usePresenceStore } from '../store/presence';
 import ChatView from './ChatView';
 import FriendsPanel from './FriendsPanel';
 import UserFooter from './UserFooter';
 import VoicePanel from './VoicePanel';
+import WelcomeView from './WelcomeView';
 
 interface HomeViewProps {
   onOpenProfile: () => void;
+  onCreateServer: () => void;
+  onJoinServer: () => void;
 }
 
 /** Home-Ansicht (Phase 7): DM-Liste links, Freunde-Panel oder DM-Chat rechts. */
-export default function HomeView({ onOpenProfile }: HomeViewProps) {
+export default function HomeView({ onOpenProfile, onCreateServer, onJoinServer }: HomeViewProps) {
   const channels = useDmsStore((s) => s.channels);
   const selectedDmId = useDmsStore((s) => s.selectedDmId);
   const selectDm = useDmsStore((s) => s.selectDm);
   const unread = useDmsStore((s) => s.unread);
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
+
+  // Onboarding (Phase 15): frisches Konto = alle drei Stores geladen und leer
+  // (auch Anfragen/Blockierte zählen – wer schon interagiert hat, ist nicht frisch).
+  const dmsLoaded = useDmsStore((s) => s.loaded);
+  const friends = useFriendsStore((s) => s.list);
+  const friendsLoaded = useFriendsStore((s) => s.loaded);
+  const serversLoaded = useServersStore((s) => s.loaded);
+  const serverCount = useServersStore((s) => s.servers.length);
+  const [welcomeSkipped, setWelcomeSkipped] = useState(false);
+  const freshAccount =
+    dmsLoaded &&
+    friendsLoaded &&
+    serversLoaded &&
+    channels.length === 0 &&
+    serverCount === 0 &&
+    friends.friends.length === 0 &&
+    friends.incoming.length === 0 &&
+    friends.outgoing.length === 0 &&
+    friends.blocked.length === 0;
+  const showWelcome = freshAccount && !welcomeSkipped;
 
   const onlineIds = new Set(onlineUsers.map((u) => u.id));
   const selected = channels.find((c) => c.id === selectedDmId) ?? null;
@@ -94,6 +120,13 @@ export default function HomeView({ onOpenProfile }: HomeViewProps) {
 
       {selected ? (
         <ChatView channel={toDmChannelInfo(selected.id, selected.otherUser.username)} dm />
+      ) : showWelcome ? (
+        <WelcomeView
+          onAddFriends={() => setWelcomeSkipped(true)}
+          onCreateServer={onCreateServer}
+          onJoinServer={onJoinServer}
+          onSkip={() => setWelcomeSkipped(true)}
+        />
       ) : (
         <FriendsPanel />
       )}
