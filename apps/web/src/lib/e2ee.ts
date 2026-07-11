@@ -122,27 +122,47 @@ export const e2ee = {
   init(userId: string): Promise<void> {
     if (currentUserId === userId && initPromise) return initPromise;
     currentUserId = userId;
-    const attempt: Promise<void> = (async () => {
+    // `let … = null` statt `const`: TS kann sonst nicht beweisen, dass die
+    // Zuweisung vor der ersten Verwendung im Closure passiert (TS2454).
+    let attempt: Promise<void> | null = null;
+    attempt = (async () => {
       await cryptoReady();
-      db = await CryptoDb.open(userId);
-      identity = (await db.get<IdentityKeyPair>('kv', 'identity')) ?? null;
-      signedPreKey = (await db.get<SignedPreKeyPair>('kv', 'spk')) ?? null;
-      if (!identity || !signedPreKey) {
-        identity = generateIdentityKeyPair();
-        signedPreKey = generateSignedPreKey(identity);
-        await db.put('kv', 'identity', identity);
-        await db.put('kv', 'spk', signedPreKey);
+      // Lokal arbeiten, erst am Ende committen (Phase 15): Ein reset()
+      // während der awaits (Logout, StrictMode-Remount der Verbindung) setzt
+      // die Globals auf null – dieser Lauf darf danach weder darauf zugreifen
+      // noch sein Ergebnis eintragen.
+      const openedDb = await CryptoDb.open(userId);
+      try {
+        let id = (await openedDb.get<IdentityKeyPair>('kv', 'identity')) ?? null;
+        let spk = (await openedDb.get<SignedPreKeyPair>('kv', 'spk')) ?? null;
+        if (!id || !spk) {
+          id = generateIdentityKeyPair();
+          spk = generateSignedPreKey(id);
+          await openedDb.put('kv', 'identity', id);
+          await openedDb.put('kv', 'spk', spk);
+        }
+        // Öffentliche Schlüssel bei jedem Login veröffentlichen (idempotent) –
+        // deckt auch den Fall ab, dass die Server-DB zurückgesetzt wurde.
+        await authFetch<void>('/api/keys', {
+          method: 'PUT',
+          body: {
+            identityKey: id.signPublicKey,
+            signedPreKey: spk.publicKey,
+            signedPreKeySignature: spk.signature,
+          },
+        });
+        if (initPromise !== attempt) {
+          // Inzwischen reset()/Nutzerwechsel: Ergebnis verwerfen.
+          openedDb.close();
+          return;
+        }
+        db = openedDb;
+        identity = id;
+        signedPreKey = spk;
+      } catch (err) {
+        openedDb.close();
+        throw err;
       }
-      // Öffentliche Schlüssel bei jedem Login veröffentlichen (idempotent) –
-      // deckt auch den Fall ab, dass die Server-DB zurückgesetzt wurde.
-      await authFetch<void>('/api/keys', {
-        method: 'PUT',
-        body: {
-          identityKey: identity.signPublicKey,
-          signedPreKey: signedPreKey.publicKey,
-          signedPreKeySignature: signedPreKey.signature,
-        },
-      });
     })().catch((err: unknown) => {
       // Fehlschlag (z. B. Netzfehler beim Veröffentlichen) nicht einfrieren:
       // Der nächste (Re-)Connect soll die Initialisierung erneut versuchen.

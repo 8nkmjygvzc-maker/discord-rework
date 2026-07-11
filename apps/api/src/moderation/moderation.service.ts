@@ -11,6 +11,7 @@ import {
   BanInfo,
   Permissions,
   ServerMemberRemovePayload,
+  ServerSelfRemovedPayload,
 } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
@@ -55,6 +56,7 @@ export class ModerationService {
       where: { userId_serverId: { userId: targetUserId, serverId } },
     });
     await this.broadcastRemoval(serverId, targetUserId);
+    await this.notifySelfRemoved(serverId, targetUserId, 'kick', reason);
     await this.writeAudit(
       serverId,
       actorId,
@@ -87,6 +89,7 @@ export class ModerationService {
       }),
     ]);
     await this.broadcastRemoval(serverId, targetUserId);
+    await this.notifySelfRemoved(serverId, targetUserId, 'ban', reason);
     await this.writeAudit(
       serverId,
       actorId,
@@ -275,6 +278,34 @@ export class ModerationService {
       'SERVER_MEMBER_REMOVE',
       { serverId, userId } satisfies ServerMemberRemovePayload,
       recipients,
+    );
+  }
+
+  /**
+   * Rückmeldung NUR an den Gekickten/Gebannten (Phase 15): Anlass und Grund
+   * gehen die übrigen Mitglieder nichts an, darum nicht Teil des
+   * SERVER_MEMBER_REMOVE-Broadcasts. Der Servername reist mit, weil der
+   * Client den Server zu diesem Zeitpunkt schon vergessen hat.
+   */
+  private async notifySelfRemoved(
+    serverId: string,
+    userId: string,
+    cause: 'kick' | 'ban',
+    reason?: string,
+  ): Promise<void> {
+    const server = await this.prisma.server.findUnique({
+      where: { id: serverId },
+      select: { name: true },
+    });
+    await this.gateway.publishDispatch(
+      'SERVER_SELF_REMOVED',
+      {
+        serverId,
+        serverName: server?.name ?? 'Unbekannter Server',
+        cause,
+        reason: reason ?? null,
+      } satisfies ServerSelfRemovedPayload,
+      [userId],
     );
   }
 

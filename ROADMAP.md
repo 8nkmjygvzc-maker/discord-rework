@@ -2,6 +2,25 @@
 
 > Laufend gepflegt (siehe CLAUDE.md Abschnitt 8). Nichts hier ist vergessen – nur bewusst verschoben.
 
+## Stand: Phasenplan abgeschlossen (11.07.2026)
+
+Alle 16 Phasen (0–15) aus CLAUDE.md Abschnitt 7 sind umgesetzt und verifiziert
+(Details in PROGRESS.md). Diese Datei ist damit der **Backlog für alles
+Weitere** – die offenen Punkte unten sind bewusste, dokumentierte Entscheidungen,
+keine vergessenen Reste. Die wichtigsten Blöcke vor den jeweils nächsten
+Meilensteinen:
+
+- **Vor einem echten Deployment (auch privat):** Dev-Passwörter in
+  `infra/docker-compose.yml`/`.env` durch echte Secrets ersetzen, TLS für
+  MinIO bzw. am Reverse-Proxy, `TRUST_PROXY` setzen, VAPID-Keys pro Umgebung,
+  History-Fallback für `/invite/<code>` am Static-Host, `MEDIASOUP_ANNOUNCED_IP`
+  konfigurieren (Details in den Abschnitten unten)
+- **Vor echtem Mehrbenutzer-Betrieb:** E-Mail-Verifizierung + Passwort-Reset,
+  2FA, Rollen-Verwaltungs-Hierarchie, Upload-Quota, Lasttests
+- **Vor einem öffentlichen Launch:** endgültiges Branding (statt „Parley“),
+  DSGVO (Datenschutzerklärung, AV-Vertrag, Löschkonzept inkl.
+  User-Lösch-Endpunkt), fachlicher/rechtlicher Rat
+
 ## Zurückgestellte Features
 
 - **Multi-Device-Support:** v1 startet mit einem Gerät pro Account; Geräte-Verknüpfung wie bei Signal/WhatsApp später (CLAUDE.md Abschnitt 6)
@@ -52,7 +71,7 @@
 - **Bann nur gegen Mitglieder, kein Message-Pruning (Phase 13):** Gebannt werden kann nur ein aktuelles Mitglied (kein „Bann per User-ID“ für Nie-Mitglieder wie bei Discord). Beim Bann werden keine bisherigen Nachrichten gelöscht (Discord bietet „Nachrichten der letzten X Stunden löschen“ an) – bei Bedarf als Option nachrüsten
 - **Auszeit läuft passiv ab (Phase 13, UI-Teil ✓ mit Phase 15):** `Membership.timeoutUntil` wird nicht proaktiv geleert; die Durchsetzung vergleicht bei jedem Senden/Voice-Beitritt gegen `now`. Ein abgelaufener Zeitstempel bleibt in der DB (harmlos). Das ⏳ im Mitglieder-Panel verschwindet seit Phase 15 per client-seitigem Timer beim Ablauf (ohne Reload); ein serverseitiges `SERVER_MEMBER_UPDATE` zum Ablaufzeitpunkt gibt es weiterhin nicht (andere Clients ohne offenes Panel brauchen es nicht – der Timer läuft überall lokal)
 - **Audit-Log ohne Pagination/Live-Feed (Phase 13):** `GET /api/servers/:id/audit-log` liefert die neuesten 100 Einträge, neueste zuerst; keine Cursor-Pagination und kein Live-Event (der Dialog lädt beim Öffnen). Für große Server nachziehen. Protokolliert werden Kick/Bann/Entbann/Timeout/Timeout-Ende/Mod-Nachrichtenlöschung/Voice-Trennen – Rollen-/Kanal-/Server-Änderungen (Phase 3/5) sind bewusst NICHT im Audit-Log (später ergänzbar)
-- **Keine „Du wurdest gebannt/gekickt“-Rückmeldung (Phase 13):** Der Betroffene erhält nur `SERVER_MEMBER_REMOVE` (der Server verschwindet wie beim Verlassen) – ohne Grund/Hinweis. Ein eigenes Event mit Grund wäre nutzerfreundlicher
+- ~~**Keine „Du wurdest gebannt/gekickt“-Rückmeldung (Phase 13)**~~ ✓ mit Phase 15 erledigt: Kick/Bann publiziert zusätzlich `SERVER_SELF_REMOVED` (Servername, Anlass, Grund) NUR an den Betroffenen – der Client zeigt einen quittierbaren Hinweis-Dialog (`NoticeHost`). Der Broadcast an die übrigen Mitglieder bleibt bewusst ohne Anlass/Grund (Moderationsdetails gehen nur den Betroffenen etwas an)
 
 ## Auth – bewusst auf später verschoben (Stand Phase 1)
 

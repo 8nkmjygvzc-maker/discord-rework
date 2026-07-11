@@ -8,8 +8,22 @@ import {
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
 import { useVoiceStore } from '../store/voice';
+import { useNoticesStore } from '../store/notices';
+import { ApiError } from '../lib/api';
 import UserFooter from './UserFooter';
 import VoicePanel from './VoicePanel';
+
+/** Server-/Kanal-Aktion mit Fehler-Hinweis statt unbehandelter Rejection. */
+function runAction(what: string, action: Promise<void>): void {
+  action.catch((err: unknown) => {
+    useNoticesStore
+      .getState()
+      .pushNotice(
+        'Aktion fehlgeschlagen',
+        err instanceof ApiError ? `${what}: ${err.message}` : `${what} – Server nicht erreichbar.`,
+      );
+  });
+}
 
 interface ChannelSidebarProps {
   onCreateChannel: (type: 'TEXT' | 'VOICE') => void;
@@ -76,7 +90,7 @@ export default function ChannelSidebar({
               title="Server löschen"
               onClick={() => {
                 if (window.confirm(`Server „${server.name}“ endgültig löschen?`)) {
-                  void deleteServer(server.id);
+                  runAction('Server löschen', deleteServer(server.id));
                 }
               }}
               className="rounded p-1 text-xs text-zinc-500 hover:bg-red-950 hover:text-red-400"
@@ -87,7 +101,7 @@ export default function ChannelSidebar({
             <button
               type="button"
               title="Server verlassen"
-              onClick={() => void leaveServer(server.id)}
+              onClick={() => runAction('Server verlassen', leaveServer(server.id))}
               className="rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
             >
               Verlassen
@@ -122,7 +136,11 @@ export default function ChannelSidebar({
                   >
                     <span className="text-zinc-500">#</span>
                     <span className="truncate">{channel.name}</span>
-                    {canDelete && <DeleteX onClick={() => void deleteChannel(channel.id)} />}
+                    {canDelete && (
+                      <DeleteX
+                        onClick={() => runAction('Kanal löschen', deleteChannel(channel.id))}
+                      />
+                    )}
                   </button>
                 </li>
               ))}
@@ -225,7 +243,9 @@ function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDele
         <span className="text-zinc-500">🔊</span>
         <span className="truncate">{channel.name}</span>
         {connecting && <span className="text-xs text-amber-400">…</span>}
-        {canDelete && <DeleteX onClick={() => void deleteChannel(channel.id)} />}
+        {canDelete && (
+          <DeleteX onClick={() => runAction('Kanal löschen', deleteChannel(channel.id))} />
+        )}
       </button>
 
       {participants.length > 0 && (

@@ -8,6 +8,7 @@ import type {
   PresenceUpdatePayload,
   ReadyPayload,
   ServerMemberRemovePayload,
+  ServerSelfRemovedPayload,
   VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { GatewayClient } from './gateway';
@@ -21,6 +22,7 @@ import { useMessagesStore } from '../store/messages';
 import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
 import { useVoiceStore } from '../store/voice';
+import { useNoticesStore } from '../store/notices';
 
 /**
  * Die eine Gateway-Verbindung des Tabs. Verteilt Dispatch-Events an die
@@ -35,9 +37,11 @@ const client = new GatewayClient({
         usePresenceStore.getState().handleReady(d as ReadyPayload);
         // Nach (Re-)Connect den REST-Stand nachziehen – Events, die während
         // einer Trennung passiert sind, sind unwiederbringlich verpasst.
-        void useServersStore.getState().loadServers();
-        void useFriendsStore.getState().loadFriends();
-        void useDmsStore.getState().loadDms();
+        // Fehler nur loggen (Phase 15): Die API kann direkt nach einem
+        // Reconnect kurz unerreichbar sein – der nächste READY lädt erneut.
+        void useServersStore.getState().loadServers().catch(logReloadError('Server'));
+        void useFriendsStore.getState().loadFriends().catch(logReloadError('Freunde'));
+        void useDmsStore.getState().loadDms().catch(logReloadError('DMs'));
         void initCrypto();
         // Falls wir vor dem Reconnect in einem Sprachkanal waren: Roster-Session
         // serverseitig neu registrieren (die Medien-WS zum SFU läuft weiter).
@@ -50,7 +54,7 @@ const client = new GatewayClient({
         usePresenceStore.getState().handlePresenceSync(d as PresenceSyncPayload);
         return;
       case 'FRIENDS_UPDATE':
-        void useFriendsStore.getState().loadFriends();
+        void useFriendsStore.getState().loadFriends().catch(logReloadError('Freunde'));
         return;
       case 'DM_CHANNEL_CREATE':
         useDmsStore.getState().handleDmCreate((d as { channel: DmChannelInfo }).channel);
@@ -95,6 +99,22 @@ const client = new GatewayClient({
         useServersStore.getState().handleGatewayEvent(t, d);
         return;
       }
+      case 'SERVER_SELF_REMOVED': {
+        // Rückmeldung an den Gekickten/Gebannten (Phase 15). Die eigentliche
+        // Entfernung erledigt das begleitende SERVER_MEMBER_REMOVE.
+        const { serverName, cause, reason } = d as ServerSelfRemovedPayload;
+        const what =
+          cause === 'ban'
+            ? `Du wurdest vom Server „${serverName}“ gebannt.`
+            : `Du wurdest vom Server „${serverName}“ entfernt.`;
+        useNoticesStore
+          .getState()
+          .pushNotice(
+            cause === 'ban' ? 'Gebannt' : 'Entfernt',
+            reason ? `${what}\nGrund: ${reason}` : what,
+          );
+        return;
+      }
       default:
         useServersStore.getState().handleGatewayEvent(t, d);
     }
@@ -123,6 +143,11 @@ async function initCrypto(): Promise<void> {
 // Neue Sender-Keys (Umschlag verarbeitet) → Unentschlüsseltes erneut versuchen.
 e2ee.onSenderKeysChanged(() => useMessagesStore.getState().retryUndecrypted());
 
+/** Fehler-Logger für die READY-Reloads (Nutzdaten kommen beim nächsten READY). */
+function logReloadError(what: string): (err: unknown) => void {
+  return (err) => console.warn(`${what} nach (Re-)Connect nicht geladen:`, err);
+}
+
 export const gateway = {
   connect: (): void => client.start(),
   disconnect: (): void => {
@@ -136,5 +161,6 @@ export const gateway = {
     useFriendsStore.getState().reset();
     useDmsStore.getState().reset();
     useVoiceStore.getState().reset();
+    useNoticesStore.getState().reset();
   },
 };

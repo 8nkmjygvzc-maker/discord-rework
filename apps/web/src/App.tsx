@@ -5,6 +5,7 @@ import { resyncPush } from './lib/push';
 import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 import MainPage from './pages/MainPage';
+import NoticeHost from './components/NoticeHost';
 
 export default function App() {
   const user = useAuthStore((s) => s.user);
@@ -36,9 +37,15 @@ export default function App() {
   }
 
   if (!user) return <AuthPage />;
-  return view === 'profile' ? (
-    <ProfilePage onBack={() => setView('main')} />
-  ) : (
-    <MainPage onOpenProfile={() => setView('profile')} />
+  return (
+    <>
+      {view === 'profile' ? (
+        <ProfilePage onBack={() => setView('main')} />
+      ) : (
+        <MainPage onOpenProfile={() => setView('profile')} />
+      )}
+      {/* Globale Hinweise (z. B. gekickt/gebannt) – unabhängig von der Ansicht. */}
+      <NoticeHost />
+    </>
   );
 }

@@ -57,6 +57,10 @@ export type GatewayEventType =
   | 'MESSAGE_DELETE'
   // Phase 13 – Mitglied aktualisiert (aktuell: Timeout gesetzt/aufgehoben).
   | 'SERVER_MEMBER_UPDATE'
+  // Phase 15 – NUR an den Betroffenen: du wurdest gekickt/gebannt (mit Grund).
+  // Das begleitende SERVER_MEMBER_REMOVE (an alle Mitglieder) trägt bewusst
+  // keinen Anlass – Moderationsdetails gehen nur den Betroffenen etwas an.
+  | 'SERVER_SELF_REMOVED'
   // Phase 5 – Rollen & Berechtigungen:
   | 'ROLE_CREATE'
   | 'ROLE_UPDATE'
@@ -140,4 +144,16 @@ export interface ChannelDeletePayload {
 export interface MessageDeletePayload {
   channelId: string;
   messageId: string;
+}
+
+/**
+ * Rückmeldung an ein gekicktes/gebanntes Mitglied (Phase 15). Der Servername
+ * reist mit, weil der Client den Server beim Eintreffen bereits aus seiner
+ * Liste entfernt hat (SERVER_MEMBER_REMOVE) und ihn nicht mehr auflösen kann.
+ */
+export interface ServerSelfRemovedPayload {
+  serverId: string;
+  serverName: string;
+  cause: 'kick' | 'ban';
+  reason: string | null;
 }

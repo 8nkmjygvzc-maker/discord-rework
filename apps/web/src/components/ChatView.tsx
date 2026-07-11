@@ -150,7 +150,11 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   }, [conversation, threadIds, query, decrypted]);
 
   useEffect(() => {
-    void loadHistory(channel.id);
+    // Fehler in der Sende-Fehlerzeile anzeigen (z. B. API kurz weg) statt als
+    // unbehandelte Rejection; ein Kanalwechsel setzt die Meldung zurück.
+    void loadHistory(channel.id).catch(() => {
+      setError('Der Nachrichtenverlauf konnte nicht geladen werden.');
+    });
   }, [channel.id, loadHistory]);
 
   // Kanalwechsel: Datei-Auswahl, Antwort-Bezug, Thread und Suche zurücksetzen.
@@ -403,7 +407,11 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
         {chan?.hasMore && !threadRootId && (
           <button
             type="button"
-            onClick={() => void loadOlder(channel.id)}
+            onClick={() =>
+              void loadOlder(channel.id).catch(() => {
+                setError('Ältere Nachrichten konnten nicht geladen werden.');
+              })
+            }
             className="mx-auto mb-3 block rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700/50"
           >
             Ältere Nachrichten laden

@@ -2,7 +2,12 @@
 
 > Diese Datei wird am Ende jeder Phase aktualisiert. Neue Session? Zuerst hier lesen, dann [CLAUDE.md](CLAUDE.md) für den Gesamtauftrag.
 
-## Status: Phase 15 (Feinschliff) in Arbeit – Schritt 4 (Onboarding-UI) verifiziert (11.07.2026)
+## Status: PHASENPLAN ABGESCHLOSSEN – Phase 15 (Feinschliff) mit Schritt 5 fertig (11.07.2026)
+
+Alle 16 Phasen (0–15) aus CLAUDE.md Abschnitt 7 sind umgesetzt und verifiziert.
+Was bewusst offen bleibt (Deployment-Härtung, Lasttests, Multi-Device, DSGVO,
+Branding …), steht priorisiert in [ROADMAP.md](ROADMAP.md) – dort zuerst lesen,
+wenn es weitergeht.
 
 ## Erledigt
 
@@ -232,9 +237,19 @@ Selbst gebaut, inkrementell (kleine verifizierte Schritte). Erledigt bisher:
 
 **Verifiziert (Schritt 4, Browser gegen echte API, frischer Nutzer `onboard_p15` über die UI registriert):** Willkommens-Ansicht erscheint direkt nach der Registrierung (Begrüßung mit Namen, drei Karten, E2EE-Hinweis, aktualisierter Rail-Tooltip); Karte „Einladung einlösen“ öffnet den Beitritts-Dialog, „Eigenen Server erstellen“ den Erstell-Dialog → Server angelegt, landet direkt im Server mit #allgemein; zurück auf Zuhause ist die Ansicht weg (Konto nicht mehr frisch), nach Server-Löschung reaktiv wieder da; „Freunde hinzufügen“ wechselt zum Freunde-Panel; Reload bringt die Ansicht zurück (Skip nur im Speicher), nach ausgehender Freundschaftsanfrage bleibt sie auch nach Reload weg; Edge-Case-Fix geprüft (Server nur mit Sprachkanal: vor dem Fix zeigte die ChatView den Sprachkanal als Text-Chat – reproduziert; nach dem Fix „Wähle einen Kanal“ + Sidebar „Noch keine Textkanäle“); Konsole über die gesamte Session sauber. Build (4 Workspaces)/Tests (11 API + 21 shared)/Lint/Format grün
 
-## Nächste Phase
+**Schritt 5 (11.07.2026) – Fehlerbehandlung/Edge-Cases + ROADMAP-Finalisierung (Phase 15 abgeschlossen):** Selbst gebaut.
 
-**Phase 15 – verbleibende Feinschliff-Punkte** (in kleinen verifizierten Schritten): restliche Fehlerbehandlung/Edge-Cases, `ROADMAP.md` finalisieren – danach ist Phase 15 (und damit der Phasenplan) abgeschlossen. Die Onboarding-UI ist mit Schritt 4 erledigt, die Voice-UI-Punkte mit Schritt 3. Größere zurückgestellte Skalierungs-/Infra-Themen (Lasttests, presigned Uploads, Message-Queue, Multi-Device) bleiben bewusst außerhalb von Phase 15 in der ROADMAP.
+- **„Du wurdest gekickt/gebannt“-Rückmeldung (ROADMAP-Punkt aus Phase 13):** Neues Gateway-Event `SERVER_SELF_REMOVED` (Servername, Anlass kick/ban, Grund) – geht NUR an den Betroffenen (`ModerationService.notifySelfRemoved`); der Broadcast `SERVER_MEMBER_REMOVE` an die übrigen Mitglieder bleibt bewusst ohne Moderationsdetails. Der Servername reist im Payload mit, weil der Client den Server beim Eintreffen bereits vergessen hat. Client: neuer Hinweis-Store (`store/notices.ts`, Queue) + `NoticeHost` (Modal mit OK, in `App` gerendert – ansichtsunabhängig), Reset beim Logout
+- **ErrorBoundary (`components/ErrorBoundary.tsx`):** Render-Fehler zeigen statt einer weißen Seite eine Fallback-UI (Meldung + Fehlertext + „Neu laden“); um `<App/>` in `main.tsx`
+- **Unbehandelte Promise-Rejections beseitigt:** READY-Reloads (`loadServers/loadFriends/loadDms`) und `FRIENDS_UPDATE` loggen Fehler jetzt statt unbehandelt zu rejecten (API kann nach Reconnect kurz weg sein; der nächste READY lädt ohnehin); `ChatView.loadHistory`/`loadOlder` zeigen die Fehlerzeile; Server-/Kanal-Aktionen der Sidebar (löschen/verlassen) melden Fehler als Hinweis-Dialog (`runAction`)
+- **E2EE-Init-Race gefixt (beim Verifizieren live gefunden):** `e2ee.init` schrieb die Modul-Globals schon während der await-Kette – ein paralleles `reset()` (Logout, React-StrictMode-Remount der Gateway-Verbindung) setzte `db` auf null und der laufende Init griff danach darauf zu (`TypeError … reading 'get'`, bei jedem Dev-Load in der Konsole). Jetzt: lokal arbeiten, am Ende nur committen, wenn der Versuch noch aktuell ist (`initPromise`-Identität); veraltete Versuche schließen ihre DB und verwerfen das Ergebnis
+- **ROADMAP.md finalisiert:** Status-Kopf „Phasenplan abgeschlossen“ mit den drei Blöcken „vor echtem Deployment / vor Mehrbenutzer-Betrieb / vor öffentlichem Launch“; erledigte Punkte markiert
+
+**Verifiziert (Schritt 5, Browser gegen echte API + portable Infra):** Frischer Nutzer `p15opfer` (UI) + Owner-Skript `p15mod_…` (REST): Beitritt per Invite → Kick mit Grund → Hinweis-Dialog „Entfernt … Grund: Zu viel Spam im Testkanal“ erscheint live, Server verschwindet aus der Leiste; erneuter Beitritt → Bann mit Grund → Dialog „Gebannt … Grund: Wiederholter Regelverstoss“; erneuter Invite-Einlöse-Versuch → serverseitig blockiert („Du bist von diesem Server gebannt“ im Dialog). ErrorBoundary: temporärer `throw` in `WelcomeView` → Fallback-UI mit Fehlertext und „Neu laden“ statt weißer Seite (danach entfernt, App normal). E2EE-Regression nach dem Init-Umbau: neue Nachricht in frischem Server wird verschlüsselt gesendet (DB: nur Ciphertext, kein Klartext-Fund), übersteht Reload lesbar; Konsole in frischem Tab komplett sauber (der Init-TypeError trat vorher bei jedem Load auf). Build (4 Workspaces)/Tests (11 API + 21 shared)/Lint/Format grün.
+
+## Nächste Schritte
+
+Der Phasenplan ist abgeschlossen. Alles Weitere steht priorisiert in [ROADMAP.md](ROADMAP.md) („Stand“-Abschnitt oben): zuerst die Deployment-Härtung (Secrets, TLS, Reverse-Proxy, VAPID, SPA-Fallback), wenn die App echte Nutzer bekommen soll.
 
 ## Dev-Umgebung (Stand Session 3, 05.07.2026)
 
@@ -248,6 +263,8 @@ Diese Maschine war frisch aufgesetzt (kein Node, kein Docker, WSL defekt). Docke
 - `.env` wurde neu erzeugt (frisches `JWT_SECRET`), Migrationen mit `prisma migrate deploy` eingespielt
 
 ## Notizen für kommende Sessions
+
+- Session 16 (11.07.2026, Phase 15 Schritt 5): Arbeitsumgebung war teilweise frisch: `node_modules` unvollständig (`npm install` + `npm run prisma:generate` nötig), **`.env` fehlte** (aus `.env.example` neu erzeugt, frisches `JWT_SECRET`), **`.claude/launch.json` fehlte** (neu angelegt, Configs api/voice/web auf `scripts/dev-*.cmd`). Infrastruktur läuft **portabel** (Docker nicht im PATH): Postgres via ensure-infra, Redis/MinIO manuell nach den `dev-infra.ps1`-Schritten. **Die portable DB war vom Migrationsstand abgedriftet** (fremde `Ban`-Tabelle mit `createdBy`, `Membership.timedOutUntil` statt `timeoutUntil` – Migration `moderation` als „failed“ markiert) → mit Arians Zustimmung per `prisma migrate reset` geleert und sauber auf alle 11 Migrationen gebracht; **alle früheren Testdaten sind weg** (auch `arian.test`/`frieda.test`). Neue Wegwerf-Nutzer in der DB: `p15opfer` (p15opfer@example.com) und `p15mod_…` (Passwort jeweils `test-passwort-123`); Testserver wurden wieder gelöscht
 
 - Projektname „Parley“ ist nur Arbeitstitel (siehe ROADMAP.md)
 - Node ist NICHT systemweit installiert – falls `node` im PATH fehlt: `%LOCALAPPDATA%\Programs\nodejs`

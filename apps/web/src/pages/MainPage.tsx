@@ -56,11 +56,13 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
   }, []);
 
   // Initiales Laden (Gateway-READY lädt ebenfalls – hier zusätzlich, damit die
-  // UI nicht auf den WebSocket warten muss).
+  // UI nicht auf den WebSocket warten muss). Fehler nur loggen: Der Effekt
+  // läuft bei Store-Änderungen erneut, und READY lädt ohnehin nach.
   useEffect(() => {
-    if (!loaded) void loadServers();
-    if (!friendsLoaded) void loadFriends();
-    if (!dmsLoaded) void loadDms();
+    const warn = (err: unknown) => console.warn('Initiales Laden fehlgeschlagen:', err);
+    if (!loaded) void loadServers().catch(warn);
+    if (!friendsLoaded) void loadFriends().catch(warn);
+    if (!dmsLoaded) void loadDms().catch(warn);
   }, [loaded, loadServers, friendsLoaded, loadFriends, dmsLoaded, loadDms]);
 
   const channel = server?.channels.find((c) => c.id === selectedChannelId) ?? null;
