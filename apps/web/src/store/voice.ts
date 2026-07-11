@@ -6,6 +6,7 @@ import type {
   VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
+import { playSound } from '../lib/sounds';
 // Nur Typen statisch – der VoiceClient (und damit mediasoup-client, ~700 KB) wird
 // erst beim ersten Beitritt dynamisch geladen (Code-Splitting, Phase 15).
 import type { VoiceClient, VideoTile } from '../lib/voice';
@@ -45,7 +46,8 @@ interface VoiceStoreState {
   setVoiceStates: (states: VoiceState[]) => void;
   handleVoiceStateUpdate: (d: VoiceStateUpdatePayload) => void;
   joinVoice: (channel: ChannelInfo) => Promise<void>;
-  leaveVoice: () => Promise<void>;
+  /** `silent` unterdrückt den Disconnect-Sound (interner Kanalwechsel). */
+  leaveVoice: (opts?: { silent?: boolean }) => Promise<void>;
   toggleMute: () => void;
   toggleDeafen: () => void;
   toggleCamera: () => Promise<void>;
@@ -100,8 +102,9 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     const self = useAuthStore.getState().user;
     if (!self) return;
     // Bereits in einem anderen Kanal? Erst sauber trennen (Medien + Roster).
+    // Silent: beim Kanalwechsel soll nur der Connect-Sound erklingen.
     if (get().activeChannelId && get().activeChannelId !== channel.id) {
-      await get().leaveVoice();
+      await get().leaveVoice({ silent: true });
     }
     set({
       activeChannelId: channel.id,
@@ -150,6 +153,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
         return;
       }
       set({ status: 'connected', hasMic: client.hasMic });
+      playSound('connect');
     } catch (err) {
       client?.disconnect();
       client = null;
@@ -167,8 +171,10 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     }
   },
 
-  leaveVoice: async () => {
+  leaveVoice: async (opts) => {
     const channelId = get().activeChannelId;
+    // Nur wenn wirklich eine Verbindung bestand (nicht bei Fehler-/Idle-Zustand).
+    if (channelId && get().status === 'connected' && !opts?.silent) playSound('disconnect');
     client?.disconnect();
     client = null;
     set({
@@ -252,6 +258,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     client = null;
     // Medien-WS ist weg – Roster serverseitig freigeben und UI zurücksetzen.
     const channelId = get().activeChannelId;
+    if (channelId && get().status === 'connected') playSound('disconnect');
     if (channelId) {
       void authFetch<void>(`/api/voice/channels/${channelId}/leave`, { method: 'POST' }).catch(
         () => undefined,
