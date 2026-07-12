@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { DecodedMessageContent, MessageInfo } from '@parley/shared';
 import type { ReactionEventState } from '../store/messages';
-import { splitMentions } from '../lib/mentions';
+import { MentionTargets, splitMentions } from '../lib/mentions';
 import { splitLinks } from '../lib/links';
 import AttachmentView from './AttachmentView';
 import Avatar from './Avatar';
@@ -25,8 +25,10 @@ interface MessageRowProps {
   isOwn: boolean;
   mentionsMe: boolean;
   myUserId: string | null;
-  /** Benutzernamen des Kanals – nur bekannte Namen werden als Erwähnung markiert. */
-  knownUsernames: string[];
+  /** Bekannte Nutzer-/Rollennamen des Kanals – nur die werden markiert. */
+  mentionTargets: MentionTargets;
+  /** Meine Rollennamen (für die gelbe Hervorhebung von Rollen-Erwähnungen). */
+  myRoleNames: string[];
   myUsername: string | null;
   /** Rohe Reaktions-Events auf diese Nachricht (Aggregation passiert hier). */
   reactionEvents: Record<string, ReactionEventState> | undefined;
@@ -61,7 +63,8 @@ export default function MessageRow({
   isOwn,
   mentionsMe,
   myUserId,
-  knownUsernames,
+  mentionTargets,
+  myRoleNames,
   myUsername,
   reactionEvents,
   canSend,
@@ -220,7 +223,8 @@ export default function MessageRow({
               (content.text || message.editedAt) && (
                 <MentionText
                   text={content.text}
-                  knownUsernames={knownUsernames}
+                  targets={mentionTargets}
+                  myRoleNames={myRoleNames}
                   myUsername={myUsername}
                   edited={!!message.editedAt}
                 />
@@ -344,38 +348,44 @@ export default function MessageRow({
   );
 }
 
-/** Text mit hervorgehobenen @Erwähnungen (nur bekannte Benutzernamen). */
+/** Text mit hervorgehobenen @Erwähnungen (Nutzer, Rollen, @everyone). */
 function MentionText({
   text,
-  knownUsernames,
+  targets,
+  myRoleNames,
   myUsername,
   edited,
 }: {
   text: string;
-  knownUsernames: string[];
+  targets: MentionTargets;
+  myRoleNames: string[];
   myUsername: string | null;
   /** Zeigt einen dezenten „(bearbeitet)“-Hinweis (Phase 13). */
   edited?: boolean;
 }) {
-  const segments = useMemo(() => splitMentions(text, knownUsernames), [text, knownUsernames]);
+  const segments = useMemo(() => splitMentions(text, targets), [text, targets]);
+  const myRoles = useMemo(() => new Set(myRoleNames.map((r) => r.toLowerCase())), [myRoleNames]);
   return (
     <p className="text-sm break-words whitespace-pre-wrap text-zinc-300">
-      {segments.map((segment, i) =>
-        segment.mention ? (
+      {segments.map((segment, i) => {
+        if (!segment.mention) return <LinkifiedText key={i} text={segment.text} />;
+        const { kind, name } = segment.mention;
+        // Gelb, wenn die Erwähnung MICH trifft (direkt, eigene Rolle, alle).
+        const hitsMe =
+          kind === 'everyone' ||
+          (kind === 'user' && !!myUsername && name.toLowerCase() === myUsername.toLowerCase()) ||
+          (kind === 'role' && myRoles.has(name.toLowerCase()));
+        return (
           <span
             key={i}
             className={`rounded px-0.5 font-medium ${
-              myUsername && segment.mention.toLowerCase() === myUsername.toLowerCase()
-                ? 'bg-yellow-500/30 text-yellow-200'
-                : 'bg-indigo-500/20 text-indigo-300'
+              hitsMe ? 'bg-yellow-500/30 text-yellow-200' : 'bg-indigo-500/20 text-indigo-300'
             }`}
           >
             {segment.text}
           </span>
-        ) : (
-          <LinkifiedText key={i} text={segment.text} />
-        ),
-      )}
+        );
+      })}
       {edited && (
         <span className="ml-1 text-[10px] text-zinc-500" title="Diese Nachricht wurde bearbeitet">
           (bearbeitet)

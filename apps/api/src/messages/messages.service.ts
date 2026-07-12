@@ -13,6 +13,7 @@ import {
   MessageHistoryResponse,
   MessageInfo,
   Permissions,
+  TypingStartPayload,
 } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
@@ -247,6 +248,22 @@ export class MessagesService {
           tag: `dm:${channelId}`,
         }),
       ),
+    );
+  }
+
+  /**
+   * „X schreibt …“ (Verbesserungs-Runde): TYPING_START an alle zustellbaren
+   * Kanal-Mitglieder außer dem Tippenden selbst. Kein DB-Schreibzugriff –
+   * der Zustand lebt nur kurz in den Clients (Timeout blendet ihn aus).
+   */
+  async typing(channelId: string, userId: string, username: string): Promise<void> {
+    const recipients = await this.channelAccess.requireChannelAccess(channelId, userId, 'send');
+    const targets = recipients.filter((r) => r !== userId);
+    if (targets.length === 0) return;
+    await this.gateway.publishDispatch(
+      'TYPING_START',
+      { channelId, userId, username } satisfies TypingStartPayload,
+      targets,
     );
   }
 

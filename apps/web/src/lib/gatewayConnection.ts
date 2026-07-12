@@ -11,6 +11,7 @@ import type {
   ServerSelfRemovedPayload,
   SoundboardPlayPayload,
   SoundboardUpdatePayload,
+  TypingStartPayload,
   UserUpdatePayload,
   VoiceStateUpdatePayload,
 } from '@parley/shared';
@@ -105,6 +106,9 @@ const client = new GatewayClient({
       }
       case 'MESSAGE_UPDATE':
         useMessagesStore.getState().handleMessageUpdate((d as { message: MessageInfo }).message);
+        return;
+      case 'TYPING_START':
+        useMessagesStore.getState().handleTypingStart(d as TypingStartPayload);
         return;
       case 'MESSAGE_DELETE': {
         const { channelId, messageId } = d as MessageDeletePayload;

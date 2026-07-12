@@ -26,11 +26,13 @@ function thumbnailBoxSize(width: number, height: number): { width: number; heigh
 
 /**
  * Ein Anhang in einer Nachricht: Bilder mit entschlüsseltem Vorschaubild
- * (Klick = Original herunterladen), alles andere als Datei-Chip.
+ * (Klick = große Vorschau/Lightbox mit Speichern-Button, Verbesserungs-Runde –
+ * vorher startete der Klick direkt den Download), alles andere als Datei-Chip.
  */
 export default function AttachmentView({ meta }: { meta: AttachmentMeta }) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   async function onDownload() {
     setDownloading(true);
@@ -47,7 +49,7 @@ export default function AttachmentView({ meta }: { meta: AttachmentMeta }) {
   return (
     <div className="mt-1">
       {meta.thumbnail ? (
-        <ThumbnailButton meta={meta} onClick={() => void onDownload()} />
+        <ThumbnailButton meta={meta} onClick={() => setLightboxOpen(true)} />
       ) : (
         <div className="flex max-w-sm items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/60 px-3 py-2">
           <span aria-hidden>📄</span>
@@ -66,6 +68,14 @@ export default function AttachmentView({ meta }: { meta: AttachmentMeta }) {
         </div>
       )}
       {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+      {lightboxOpen && (
+        <ImageLightbox
+          meta={meta}
+          downloading={downloading}
+          onDownload={() => void onDownload()}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -94,7 +104,7 @@ function ThumbnailButton({ meta, onClick }: { meta: AttachmentMeta; onClick: () 
   return (
     <button
       type="button"
-      title={`${meta.name} (${formatBytes(meta.sizeBytes)}) – klicken zum Speichern`}
+      title={`${meta.name} (${formatBytes(meta.sizeBytes)}) – klicken für große Vorschau`}
       onClick={onClick}
       className="block overflow-hidden rounded-lg border border-zinc-700/60 focus:outline-2 focus:outline-indigo-500"
       style={{ width: box.width, height: box.height, maxWidth: '100%' }}
@@ -113,5 +123,88 @@ function ThumbnailButton({ meta, onClick }: { meta: AttachmentMeta; onClick: () 
         </span>
       )}
     </button>
+  );
+}
+
+/**
+ * Große Bild-Vorschau (Lightbox): entschlüsselt das ORIGINAL (nicht nur das
+ * Thumbnail) und zeigt es bildschirmfüllend. Klick daneben oder Esc schließt;
+ * Speichern startet den Download wie bisher.
+ */
+function ImageLightbox({
+  meta,
+  downloading,
+  onDownload,
+  onClose,
+}: {
+  meta: AttachmentMeta;
+  downloading: boolean;
+  onDownload: () => void;
+  onClose: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getDecryptedObjectUrl(meta, meta.mimeType).then(
+      (objectUrl) => active && setUrl(objectUrl),
+      () => active && setFailed(true),
+    );
+    return () => {
+      active = false;
+    };
+  }, [meta]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black/85 p-4"
+      onClick={onClose}
+      data-testid="image-lightbox"
+    >
+      <div className="flex items-center gap-3 pb-3" onClick={(e) => e.stopPropagation()}>
+        <p className="min-w-0 truncate text-sm text-zinc-200">
+          {meta.name} <span className="text-zinc-500">({formatBytes(meta.sizeBytes)})</span>
+        </p>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={downloading}
+          className="ml-auto shrink-0 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm font-semibold text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+        >
+          {downloading ? '…' : '⬇ Speichern'}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Schließen"
+          className="shrink-0 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        {failed ? (
+          <p className="text-sm text-zinc-400">Bild konnte nicht geladen werden.</p>
+        ) : url ? (
+          <img
+            src={url}
+            alt={meta.name}
+            onClick={(e) => e.stopPropagation()}
+            className="animate-pop-in max-h-full max-w-full rounded object-contain"
+          />
+        ) : (
+          <p className="animate-pulse text-sm text-zinc-400">Wird entschlüsselt …</p>
+        )}
+      </div>
+    </div>
   );
 }

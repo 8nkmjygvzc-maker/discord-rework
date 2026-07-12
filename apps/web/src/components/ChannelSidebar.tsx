@@ -5,13 +5,13 @@ import {
   permissionsFromString,
   VoiceState,
 } from '@parley/shared';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
 import { useVoiceStore } from '../store/voice';
 import { useNoticesStore } from '../store/notices';
+import { useUiStore } from '../store/ui';
 import { ApiError } from '../lib/api';
-import { uploadServerIcon } from '../lib/profileImage';
 import Avatar from './Avatar';
 import UserFooter from './UserFooter';
 import VoicePanel from './VoicePanel';
@@ -33,6 +33,8 @@ interface ChannelSidebarProps {
   onOpenProfile: () => void;
   onOpenRoles: () => void;
   onOpenInvite: () => void;
+  onOpenSettings: () => void;
+  onOpenModeration: () => void;
 }
 
 /** Mittlere Spalte: Server-Kopf, Text-/Sprachkanäle, Voice-Panel, Nutzer-Panel. */
@@ -41,6 +43,8 @@ export default function ChannelSidebar({
   onOpenProfile,
   onOpenRoles,
   onOpenInvite,
+  onOpenSettings,
+  onOpenModeration,
 }: ChannelSidebarProps) {
   const user = useAuthStore((s) => s.user);
   const server = useServersStore((s) => s.selectedServer);
@@ -49,6 +53,7 @@ export default function ChannelSidebar({
   const deleteChannel = useServersStore((s) => s.deleteChannel);
   const leaveServer = useServersStore((s) => s.leaveServer);
   const deleteServer = useServersStore((s) => s.deleteServer);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (!user) return null;
   const isOwner = server?.ownerId === user.id;
@@ -57,61 +62,106 @@ export default function ChannelSidebar({
   const canManageRoles = hasPermission(myPerms, Permissions.ManageRoles);
   const canManageServer = hasPermission(myPerms, Permissions.ManageServer);
   const canInvite = hasPermission(myPerms, Permissions.CreateInvite);
+  const canModerate =
+    hasPermission(myPerms, Permissions.KickMembers) ||
+    hasPermission(myPerms, Permissions.BanMembers) ||
+    hasPermission(myPerms, Permissions.ModerateMembers) ||
+    canManageServer;
 
   const textChannels = server?.channels.filter((c) => c.type === 'TEXT') ?? [];
   const voiceChannels = server?.channels.filter((c) => c.type === 'VOICE') ?? [];
   const canDelete = canManageChannels && (server?.channels.length ?? 0) > 1;
 
+  /** Menü-Eintrag anklicken: Menü zu, Aktion ausführen. */
+  const menuAction = (action: () => void) => () => {
+    setMenuOpen(false);
+    action();
+  };
+
   return (
-    <aside className="flex w-60 shrink-0 flex-col bg-zinc-900">
-      {/* Server-Kopf */}
-      <header className="flex items-center justify-between gap-2 border-b border-zinc-950/50 px-3 py-3 shadow">
-        {server && <ServerIcon server={server} canManage={canManageServer} />}
-        <h1 className="truncate font-bold text-zinc-100">{server?.name ?? 'Kein Server'}</h1>
-        {server && canInvite && (
-          <button
-            type="button"
-            title="Zum Server einladen"
-            onClick={onOpenInvite}
-            className="ml-auto rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-          >
-            Einladen
-          </button>
-        )}
-        {server && canManageRoles && (
-          <button
-            type="button"
-            title="Rollen verwalten"
-            onClick={onOpenRoles}
-            className="rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-          >
-            Rollen
-          </button>
-        )}
-        {server &&
-          (isOwner ? (
-            <button
-              type="button"
-              title="Server löschen"
-              onClick={() => {
-                if (window.confirm(`Server „${server.name}“ endgültig löschen?`)) {
-                  runAction('Server löschen', deleteServer(server.id));
-                }
-              }}
-              className="rounded p-1 text-xs text-zinc-500 hover:bg-red-950 hover:text-red-400"
+    <aside className="flex h-full w-60 shrink-0 flex-col bg-zinc-900">
+      {/* Server-Kopf: Klick auf Icon/Name öffnet das Server-Menü
+          (Einladen, Rollen, Einstellungen … – Verbesserungs-Runde). */}
+      <header className="relative border-b border-zinc-950/50 shadow">
+        <button
+          type="button"
+          disabled={!server}
+          onClick={() => setMenuOpen((v) => !v)}
+          title="Server-Menü öffnen"
+          data-testid="server-menu-button"
+          className={`flex w-full items-center gap-2 px-3 py-3 text-left transition ${
+            menuOpen ? 'bg-zinc-800/80' : 'hover:bg-zinc-800/60'
+          }`}
+        >
+          {server && (
+            <Avatar name={server.name} avatarUrl={server.iconUrl} sizeClass="h-7 w-7 text-xs" />
+          )}
+          <h1 className="min-w-0 flex-1 truncate font-bold text-zinc-100">
+            {server?.name ?? 'Kein Server'}
+          </h1>
+          {server && (
+            <span
+              className={`shrink-0 text-xs text-zinc-500 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
+              aria-hidden
             >
-              Löschen
-            </button>
-          ) : (
-            <button
-              type="button"
-              title="Server verlassen"
-              onClick={() => runAction('Server verlassen', leaveServer(server.id))}
-              className="rounded p-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+              ▾
+            </span>
+          )}
+        </button>
+
+        {menuOpen && server && (
+          <>
+            {/* Unsichtbare Fläche: Klick daneben schließt das Menü. */}
+            <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
+            <div
+              className="animate-pop-in absolute top-full right-2 left-2 z-40 mt-1 rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-xl"
+              data-testid="server-menu"
             >
-              Verlassen
-            </button>
-          ))}
+              {canInvite && (
+                <ServerMenuItem
+                  icon="📨"
+                  label="Leute einladen"
+                  onClick={menuAction(onOpenInvite)}
+                />
+              )}
+              {canManageRoles && (
+                <ServerMenuItem icon="🏷️" label="Rollen" onClick={menuAction(onOpenRoles)} />
+              )}
+              {canModerate && (
+                <ServerMenuItem
+                  icon="🛡️"
+                  label="Moderation"
+                  onClick={menuAction(onOpenModeration)}
+                />
+              )}
+              <ServerMenuItem
+                icon="⚙️"
+                label="Servereinstellungen"
+                onClick={menuAction(onOpenSettings)}
+              />
+              <div className="my-1 border-t border-zinc-800" />
+              {isOwner ? (
+                <ServerMenuItem
+                  icon="🗑️"
+                  label="Server löschen"
+                  danger
+                  onClick={menuAction(() => {
+                    if (window.confirm(`Server „${server.name}“ endgültig löschen?`)) {
+                      runAction('Server löschen', deleteServer(server.id));
+                    }
+                  })}
+                />
+              ) : (
+                <ServerMenuItem
+                  icon="🚪"
+                  label="Server verlassen"
+                  danger
+                  onClick={menuAction(() => runAction('Server verlassen', leaveServer(server.id)))}
+                />
+              )}
+            </div>
+          </>
+        )}
       </header>
 
       {/* Kanalliste */}
@@ -132,7 +182,11 @@ export default function ChannelSidebar({
                 <li key={channel.id} className="group">
                   <button
                     type="button"
-                    onClick={() => selectChannel(channel.id)}
+                    onClick={() => {
+                      selectChannel(channel.id);
+                      // Handy: Kanalwahl schließt den Navigations-Drawer.
+                      useUiStore.getState().closeNav();
+                    }}
                     className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm ${
                       channel.id === selectedChannelId
                         ? 'bg-zinc-700/60 text-zinc-100'
@@ -175,65 +229,31 @@ export default function ChannelSidebar({
   );
 }
 
-/**
- * Server-Icon im Kopf der Sidebar (Phase 15). Mit ManageServer öffnet ein
- * Klick die Dateiauswahl zum Hochladen; das SERVER_UPDATE-Event verteilt die
- * neue iconUrl an alle Mitglieder (auch im ServerDock).
- */
-function ServerIcon({
-  server,
-  canManage,
+/** Ein Eintrag im Server-Menü (Verbesserungs-Runde). */
+function ServerMenuItem({
+  icon,
+  label,
+  danger = false,
+  onClick,
 }: {
-  server: { id: string; name: string; iconUrl: string | null };
-  canManage: boolean;
+  icon: string;
+  label: string;
+  danger?: boolean;
+  onClick: () => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function onSelected(files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
-    setBusy(true);
-    try {
-      await uploadServerIcon(server.id, file);
-    } catch (err) {
-      useNoticesStore
-        .getState()
-        .pushNotice(
-          'Server-Icon',
-          err instanceof ApiError || err instanceof Error ? err.message : 'Upload fehlgeschlagen',
-        );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const icon = <Avatar name={server.name} avatarUrl={server.iconUrl} sizeClass="h-7 w-7 text-xs" />;
-  if (!canManage) return icon;
   return (
-    <>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        data-testid="server-icon-input"
-        onChange={(e) => {
-          void onSelected(e.target.files);
-          e.target.value = '';
-        }}
-      />
-      <button
-        type="button"
-        title="Server-Icon ändern"
-        disabled={busy}
-        onClick={() => inputRef.current?.click()}
-        className="shrink-0 rounded-full transition hover:scale-110 disabled:opacity-60"
-        data-testid="server-icon-button"
-      >
-        {icon}
-      </button>
-    </>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+        danger
+          ? 'text-red-400 hover:bg-red-950/60'
+          : 'text-zinc-200 hover:bg-indigo-600 hover:text-white'
+      }`}
+    >
+      <span aria-hidden>{icon}</span>
+      {label}
+    </button>
   );
 }
 

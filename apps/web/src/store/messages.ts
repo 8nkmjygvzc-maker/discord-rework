@@ -8,13 +8,14 @@ import {
   MessageHistoryResponse,
   MessageInfo,
   ReplyRef,
+  TypingStartPayload,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
 import { useServersStore } from './servers';
 import { dmMemberIds, useDmsStore } from './dms';
 import { e2ee } from '../lib/e2ee';
 import { collectAttachmentIds, uploadAttachment } from '../lib/attachments';
-import { mentionsUser } from '../lib/mentions';
+import { mentionsMember, mentionsUser } from '../lib/mentions';
 import { notifyMention, recallChannelLabel } from '../lib/notifications';
 
 interface ChannelMessages {
@@ -51,6 +52,8 @@ interface MessagesState {
   decrypted: Record<string, DecodedMessageContent>;
   /** targetMessageId → `${userId}|${emoji}` → letzter Stand. */
   reactions: Record<string, Record<string, ReactionEventState>>;
+  /** channelId → userId → „schreibt gerade“ (verfällt nach TYPING_TTL_MS). */
+  typing: Record<string, Record<string, { username: string; expiresAt: number }>>;
 
   loadHistory: (channelId: string) => Promise<void>;
   loadOlder: (channelId: string) => Promise<void>;
@@ -72,6 +75,8 @@ interface MessagesState {
   deleteMessage: (channelId: string, messageId: string) => Promise<void>;
 
   handleMessageCreate: (message: MessageInfo) => void;
+  /** „X schreibt …“ (TYPING_START); verfällt automatisch. */
+  handleTypingStart: (d: TypingStartPayload) => void;
   handleMessageUpdate: (message: MessageInfo, content?: DecodedMessageContent) => void;
   handleMessageDelete: (channelId: string, messageId: string) => void;
   retryUndecrypted: () => void;
@@ -79,6 +84,9 @@ interface MessagesState {
 }
 
 const EMPTY: ChannelMessages = { messages: [], hasMore: false, loaded: false };
+
+/** Ohne neues TYPING_START verschwindet „X schreibt …“ nach dieser Zeit. */
+const TYPING_TTL_MS = 8_000;
 
 function authFetch<T>(
   path: string,
@@ -114,6 +122,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
   byChannel: {},
   decrypted: {},
   reactions: {},
+  typing: {},
 
   loadHistory: async (channelId) => {
     if (get().byChannel[channelId]?.loaded) return;
@@ -218,12 +227,53 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
 
   handleMessageCreate: (message) => {
     set((s) => {
+      const next: Partial<MessagesState> = {};
+      // Wer eine Nachricht abschickt, tippt nicht mehr → Anzeige sofort weg.
+      const chanTyping = s.typing[message.channelId];
+      if (chanTyping?.[message.senderId]) {
+        const rest = { ...chanTyping };
+        delete rest[message.senderId];
+        next.typing = { ...s.typing, [message.channelId]: rest };
+      }
       const chan = s.byChannel[message.channelId];
-      // Kanal nie geöffnet → nichts tun, die History lädt später ohnehin frisch.
-      if (!chan?.loaded) return {};
-      return { byChannel: { ...s.byChannel, [message.channelId]: appendMessage(chan, message) } };
+      // Kanal nie geöffnet → History lädt später ohnehin frisch.
+      if (chan?.loaded) {
+        next.byChannel = { ...s.byChannel, [message.channelId]: appendMessage(chan, message) };
+      }
+      return next;
     });
     void decryptBatch([message], set, get, true);
+  },
+
+  handleTypingStart: (d) => {
+    // Der eigene Nutzer (anderer Tab) braucht keine Anzeige.
+    if (d.userId === useAuthStore.getState().user?.id) return;
+    set((s) => ({
+      typing: {
+        ...s.typing,
+        [d.channelId]: {
+          ...(s.typing[d.channelId] ?? {}),
+          [d.userId]: { username: d.username, expiresAt: Date.now() + TYPING_TTL_MS },
+        },
+      },
+    }));
+    // Verfall: kurz nach Ablauf alle abgelaufenen Einträge entfernen (löst das
+    // Re-Render aus, das die Anzeige ausblendet).
+    setTimeout(() => {
+      const now = Date.now();
+      set((s) => {
+        let changed = false;
+        const typing: MessagesState['typing'] = {};
+        for (const [channelId, users] of Object.entries(s.typing)) {
+          const alive = Object.fromEntries(
+            Object.entries(users).filter(([, v]) => v.expiresAt > now),
+          );
+          if (Object.keys(alive).length < Object.keys(users).length) changed = true;
+          if (Object.keys(alive).length > 0) typing[channelId] = alive;
+        }
+        return changed ? { typing } : {};
+      });
+    }, TYPING_TTL_MS + 200);
   },
 
   /**
@@ -297,7 +347,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
   reset: () => {
     // Sonst gälten nach einem Re-Login alte History-Nachrichten als „live“.
     pendingLive.clear();
-    set({ byChannel: {}, decrypted: {}, reactions: {} });
+    set({ byChannel: {}, decrypted: {}, reactions: {}, typing: {} });
   },
 }));
 
@@ -365,10 +415,44 @@ async function decryptBatch(
     // damit Reaktions-Events den Zähler nicht fälschlich erhöhen. Der Store
     // ignoriert Kanäle, die keine DMs sind oder gerade sichtbar sind.
     useDmsStore.getState().markUnread(message.channelId);
-    if (mentionsUser(content.text, me.username)) {
+    if (isMentioningMe(message.channelId, content.text, me)) {
       notifyMention(message.senderUsername, channelLabel(message.channelId), content.text);
     }
   }
+}
+
+/**
+ * Bin ich in diesem Text gemeint? Im ausgewählten Server zählen auch meine
+ * Rollen und @everyone; in DMs nur der direkte Name; für Kanäle NICHT
+ * ausgewählter Server fehlen die Rollennamen – dort greifen nur @benutzername
+ * und @everyone.
+ */
+function isMentioningMe(
+  channelId: string,
+  text: string,
+  me: { id: string; username: string },
+): boolean {
+  const server = useServersStore.getState().selectedServer;
+  if (server?.channels.some((c) => c.id === channelId)) {
+    const roleNames = server.roles.filter((r) => !r.isDefault).map((r) => r.name);
+    const myRoleIds = new Set(server.members.find((m) => m.userId === me.id)?.roleIds ?? []);
+    const myRoleNames = server.roles.filter((r) => myRoleIds.has(r.id)).map((r) => r.name);
+    return mentionsMember(
+      text,
+      { usernames: [me.username], roleNames, everyone: true },
+      me.username,
+      myRoleNames,
+    );
+  }
+  if (useDmsStore.getState().channels.some((c) => c.id === channelId)) {
+    return mentionsUser(text, me.username);
+  }
+  return mentionsMember(
+    text,
+    { usernames: [me.username], roleNames: [], everyone: true },
+    me.username,
+    [],
+  );
 }
 
 /**

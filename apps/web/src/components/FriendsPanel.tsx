@@ -3,6 +3,7 @@ import type { PublicUser } from '@parley/shared';
 import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
 import { usePresenceStore } from '../store/presence';
+import { useUiStore } from '../store/ui';
 import { ApiError } from '../lib/api';
 import Avatar from './Avatar';
 
@@ -62,9 +63,17 @@ export default function FriendsPanel() {
 
   return (
     <main className="animate-view-in flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-4 border-b border-zinc-950/50 px-4 py-3 shadow">
+      <header className="flex items-center gap-4 border-b border-zinc-950/50 px-4 py-3 shadow max-md:gap-2">
+        <button
+          type="button"
+          title="Navigation anzeigen"
+          onClick={() => useUiStore.getState().toggleNav()}
+          className="-ml-1 rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700/50 md:hidden"
+        >
+          ☰
+        </button>
         <span className="font-semibold">Freunde</span>
-        <nav className="flex gap-2">
+        <nav className="flex min-w-0 gap-2 overflow-x-auto">
           {tabs.map((t) => (
             <button
               key={t.id}

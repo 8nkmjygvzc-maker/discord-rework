@@ -70,6 +70,21 @@ export class MessagesController {
   }
 
   /**
+   * „X schreibt …“ (Verbesserungs-Runde): verteilt TYPING_START an die
+   * Kanal-Mitglieder. Verlangt Sende-Berechtigung; der Client drosselt selbst
+   * (ein Ping alle paar Sekunden), das Rate-Limit fängt Ausreißer ab.
+   */
+  @Post('typing')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RateLimit({ limit: 30, windowS: 30 })
+  typing(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+  ): Promise<void> {
+    return this.messages.typing(channelId, user.sub, user.username);
+  }
+
+  /**
    * Erwähnungs-Push (Phase 12): Der Client meldet die erwähnten Mitglieder,
    * der Server pusht die offline unter ihnen. Verlangt Sende-Berechtigung.
    */

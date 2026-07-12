@@ -74,6 +74,15 @@ function authFetch<T>(
 // Der VoiceClient hält Medienzustand (Transporte, Tracks) außerhalb des Stores.
 let client: VoiceClient | null = null;
 
+/**
+ * Wer sitzt (außer mir) gerade im VERBUNDENEN Sprachkanal? Bewusst getrennt
+ * von `voiceStates` (das ist nur das Roster des AUSGEWÄHLTEN Servers und wird
+ * beim Serverwechsel ersetzt) – nur so lassen sich Join/Leave-Sounds für
+ * andere Teilnehmer zuverlässig auslösen, auch während man einen anderen
+ * Server ansieht. Mute-/Kamera-Updates (Nutzer bereits im Set) bleiben stumm.
+ */
+const channelPeers = new Set<string>();
+
 export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   activeChannelId: null,
   activeServerId: null,
@@ -90,7 +99,21 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
 
   setVoiceStates: (states) => set({ voiceStates: states }),
 
-  handleVoiceStateUpdate: (d) =>
+  handleVoiceStateUpdate: (d) => {
+    // Join/Leave-Sound für ANDERE im eigenen Kanal (Verbesserungs-Runde).
+    const me = useAuthStore.getState().user;
+    const s0 = get();
+    if (me && d.userId !== me.id && s0.status === 'connected' && s0.activeChannelId) {
+      const isHere = d.state !== null && d.channelId === s0.activeChannelId;
+      const wasHere = channelPeers.has(d.userId);
+      if (isHere && !wasHere) {
+        channelPeers.add(d.userId);
+        if (!s0.selfDeafened) playSound('userJoin');
+      } else if (!isHere && wasHere) {
+        channelPeers.delete(d.userId);
+        if (!s0.selfDeafened) playSound('userLeave');
+      }
+    }
     set((s) => {
       const without = s.voiceStates.filter((v) => v.userId !== d.userId);
       if (d.state === null) return { voiceStates: without };
@@ -100,7 +123,8 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
           { channelId: d.channelId, userId: d.userId, username: d.username, ...d.state },
         ],
       };
-    }),
+    });
+  },
 
   joinVoice: async (channel) => {
     const self = useAuthStore.getState().user;
@@ -162,6 +186,11 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
         return;
       }
       set({ status: 'connected', hasMic: client.hasMic });
+      // Bereits anwesende Teilnehmer merken (ohne Sound – man kommt ja selbst).
+      channelPeers.clear();
+      for (const v of get().voiceStates) {
+        if (v.channelId === channel.id && v.userId !== self.id) channelPeers.add(v.userId);
+      }
       playSound('connect');
     } catch (err) {
       client?.disconnect();
@@ -185,6 +214,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     const channelId = get().activeChannelId;
     // Nur wenn wirklich eine Verbindung bestand (nicht bei Fehler-/Idle-Zustand).
     if (channelId && get().status === 'connected' && !opts?.silent) playSound('disconnect');
+    channelPeers.clear();
     client?.disconnect();
     client = null;
     set({
@@ -267,6 +297,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
 
   handleVoiceClosed: () => {
     client = null;
+    channelPeers.clear();
     // Medien-WS ist weg – Roster serverseitig freigeben und UI zurücksetzen.
     const channelId = get().activeChannelId;
     if (channelId && get().status === 'connected') playSound('disconnect');
@@ -321,6 +352,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   reset: () => {
     client?.disconnect();
     client = null;
+    channelPeers.clear();
     set({
       activeChannelId: null,
       activeServerId: null,

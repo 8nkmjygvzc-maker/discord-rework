@@ -93,6 +93,28 @@ body,
   animation: pop-in 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
 }
 
+/* Zuhause-Icon „ploppt“, wenn eine neue DM/Anfrage eintrifft. */
+@keyframes badge-pop {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.35);
+  }
+  55% {
+    transform: scale(0.92);
+  }
+  75% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-badge-pop {
+  animation: badge-pop 0.6s ease-out both;
+}
+
 /* Sanft pulsierender Online-Punkt. */
 @keyframes presence-pulse {
   0%,
@@ -139,6 +161,7 @@ body,
   .animate-view-in,
   .animate-pop-in,
   .animate-presence,
+  .animate-badge-pop,
   .auth-aurora {
     animation: none;
   }
