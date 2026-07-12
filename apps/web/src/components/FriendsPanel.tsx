@@ -4,6 +4,7 @@ import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
 import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
+import Avatar from './Avatar';
 
 type Tab = 'friends' | 'requests' | 'blocked';
 
@@ -60,7 +61,7 @@ export default function FriendsPanel() {
   ];
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col">
+    <main className="animate-view-in flex min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-4 border-b border-zinc-950/50 px-4 py-3 shadow">
         <span className="font-semibold">Freunde</span>
         <nav className="flex gap-2">
@@ -194,9 +195,7 @@ function UserList({
             className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-zinc-700/40"
           >
             <div className="relative">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-700 font-bold text-white">
-                {user.username.slice(0, 1).toUpperCase()}
-              </div>
+              <Avatar name={user.username} avatarUrl={user.avatarUrl} sizeClass="h-9 w-9" />
               {status && (
                 <span
                   title={status === 'online' ? 'Online' : 'Offline'}
@@ -208,8 +207,9 @@ function UserList({
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-zinc-100">{user.username}</p>
+              {/* Eigener Status-Text vor dem Online-Zustand (Phase 15). */}
               <p className="truncate text-xs text-zinc-500">
-                {status ? (status === 'online' ? 'Online' : 'Offline') : user.status || ' '}
+                {user.status || (status ? (status === 'online' ? 'Online' : 'Offline') : ' ')}
               </p>
             </div>
             <div className="flex gap-1.5 opacity-0 transition group-hover:opacity-100">

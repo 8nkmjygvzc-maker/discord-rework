@@ -1,20 +1,24 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import type { Readable } from 'node:stream';
 import { Channel, Membership, Server, User } from '@prisma/client';
 import {
   ChannelInfo,
   DEFAULT_ROLE_PERMISSIONS,
+  MAX_PROFILE_IMAGE_BYTES,
   Permissions,
   permissionsToString,
   ServerDetails,
   ServerMember,
   ServerSummary,
 } from '@parley/shared';
+import { detectImageContentType } from '../common/image.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { PresenceService } from '../gateway/presence.service';
@@ -27,9 +31,12 @@ import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 
 type MembershipWithUser = Membership & {
-  user: Pick<User, 'username'>;
+  user: Pick<User, 'username' | 'avatarUrl' | 'status'>;
   roles: { roleId: string }[];
 };
+
+/** Prisma-Select für den User-Anteil eines ServerMember (Phase 15: +Profil). */
+export const MEMBER_USER_SELECT = { username: true, avatarUrl: true, status: true } as const;
 
 @Injectable()
 export class ServersService {
@@ -87,7 +94,7 @@ export class ServersService {
       this.prisma.membership.findMany({
         where: { serverId },
         include: {
-          user: { select: { username: true } },
+          user: { select: MEMBER_USER_SELECT },
           roles: { select: { roleId: true } },
         },
         orderBy: { joinedAt: 'asc' },
@@ -126,7 +133,14 @@ export class ServersService {
     dto: UpdateServerDto,
   ): Promise<ServerSummary> {
     await this.permissions.requirePermission(serverId, userId, Permissions.ManageServer);
-    const server = await this.prisma.server.update({ where: { id: serverId }, data: dto });
+    const server = await this.prisma.server.update({
+      where: { id: serverId },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        // '' = Icon entfernen (Upload ist der einzige Weg, eines zu setzen).
+        ...(dto.iconUrl !== undefined ? { iconUrl: null } : {}),
+      },
+    });
     const summary = toServerSummary(server);
     await this.gateway.publishDispatch(
       'SERVER_UPDATE',
@@ -134,6 +148,60 @@ export class ServersService {
       await this.memberIds(serverId),
     );
     return summary;
+  }
+
+  /**
+   * Server-Icon hochladen (Phase 15). Wie Avatare bewusst unverschlüsselt –
+   * Icons sind öffentliche Metadaten und müssen per <img> ladbar sein.
+   */
+  async setIcon(serverId: string, userId: string, data: Buffer): Promise<ServerSummary> {
+    await this.permissions.requirePermission(serverId, userId, Permissions.ManageServer);
+    if (data.length === 0) throw new BadRequestException('Leeres Bild');
+    if (data.length > MAX_PROFILE_IMAGE_BYTES) {
+      throw new BadRequestException('Server-Icon ist zu groß (max. 2 MiB)');
+    }
+    const contentType = detectImageContentType(data);
+    if (!contentType) {
+      throw new BadRequestException('Nur Bilder (PNG, JPEG, WebP, GIF) sind erlaubt');
+    }
+    await this.storage.putObject(iconKey(serverId), data, contentType);
+    const server = await this.prisma.server.update({
+      where: { id: serverId },
+      data: { iconUrl: `/api/servers/${serverId}/icon?v=${Date.now()}` },
+    });
+    const summary = toServerSummary(server);
+    await this.gateway.publishDispatch(
+      'SERVER_UPDATE',
+      { server: summary },
+      await this.memberIds(serverId),
+    );
+    return summary;
+  }
+
+  /** Icon-Blob streamen – öffentlich (siehe ServersPublicController). */
+  async getIconStream(
+    serverId: string,
+  ): Promise<{ stream: Readable; sizeBytes: number; contentType: string }> {
+    const server = await this.prisma.server.findUnique({
+      where: { id: serverId },
+      select: { iconUrl: true },
+    });
+    if (!server?.iconUrl?.startsWith(`/api/servers/${serverId}/icon`)) {
+      throw new NotFoundException('Kein Server-Icon vorhanden');
+    }
+    try {
+      const [stat, stream] = await Promise.all([
+        this.storage.statObject(iconKey(serverId)),
+        this.storage.getObjectStream(iconKey(serverId)),
+      ]);
+      return {
+        stream,
+        sizeBytes: stat.sizeBytes,
+        contentType: stat.contentType ?? 'application/octet-stream',
+      };
+    } catch {
+      throw new NotFoundException('Kein Server-Icon vorhanden');
+    }
   }
 
   /** Löschen bleibt bewusst dem Owner vorbehalten – auch Admins dürfen das nicht. */
@@ -185,7 +253,7 @@ export class ServersService {
 
     const membership = await this.prisma.membership.create({
       data: { userId, serverId },
-      include: { user: { select: { username: true } }, roles: { select: { roleId: true } } },
+      include: { user: { select: MEMBER_USER_SELECT }, roles: { select: { roleId: true } } },
     });
     const memberIds = await this.memberIds(serverId);
     await this.gateway.publishDispatch(
@@ -323,6 +391,11 @@ export class ServersService {
 
 // --- Mapper: DB-Objekte → API-Typen (nie DB-Objekte direkt ausliefern) -------
 
+/** Objektschlüssel des Server-Icons im (gemeinsamen) MinIO-Bucket. */
+function iconKey(serverId: string): string {
+  return `servericons/${serverId}`;
+}
+
 function toServerSummary(server: Server): ServerSummary {
   return {
     id: server.id,
@@ -349,6 +422,8 @@ export function toServerMember(m: MembershipWithUser): ServerMember {
     userId: m.userId,
     username: m.user.username,
     nickname: m.nickname,
+    avatarUrl: m.user.avatarUrl,
+    status: m.user.status,
     joinedAt: m.joinedAt.toISOString(),
     roleIds: m.roles.map((r) => r.roleId),
     timeoutUntil: m.timeoutUntil?.toISOString() ?? null,

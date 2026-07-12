@@ -83,7 +83,11 @@ export type GatewayEventType =
   // Soundboard: Sound abspielen (NUR an Nutzer, die gerade im Sprachkanal
   // sitzen) bzw. Bibliothek geändert (an Mitglieder mit ViewChannels).
   | 'SOUNDBOARD_PLAY'
-  | 'SOUNDBOARD_UPDATE';
+  | 'SOUNDBOARD_UPDATE'
+  // Phase 15 – Profil geändert (Status/Avatar): geht an den Sichtbarkeits-
+  // kreis + den Nutzer selbst; Clients aktualisieren Mitglieder-/Freundes-/
+  // DM-Listen in place.
+  | 'USER_UPDATE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {
@@ -119,6 +123,16 @@ export interface ReadyPayload {
 export interface PresenceUpdatePayload {
   user: PresenceUser;
   online: boolean;
+}
+
+/** Profilaktualisierung (Status/Avatar, Phase 15) – Form wie PublicUser. */
+export interface UserUpdatePayload {
+  user: {
+    id: string;
+    username: string;
+    avatarUrl: string | null;
+    status: string;
+  };
 }
 
 /** Nachträglich sichtbar gewordene Online-Nutzer (additiv zum Client-Stand). */

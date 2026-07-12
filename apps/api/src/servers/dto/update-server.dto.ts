@@ -1,4 +1,4 @@
-import { IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import { Equals, IsOptional, IsString, Length } from 'class-validator';
 
 export class UpdateServerDto {
   @IsOptional()
@@ -6,8 +6,12 @@ export class UpdateServerDto {
   @Length(2, 100)
   name?: string;
 
+  /**
+   * Seit Phase 15 wird das Icon ausschließlich über POST /servers/:id/icon
+   * hochgeladen; hier ist nur noch '' erlaubt (Icon entfernen). Beliebige
+   * URLs wären ein Privacy-Leak (siehe UpdateProfileDto.avatarUrl).
+   */
   @IsOptional()
-  @IsString()
-  @MaxLength(500)
+  @Equals('', { message: 'Server-Icons werden über den Upload gesetzt' })
   iconUrl?: string;
 }

@@ -12,6 +12,7 @@ import {
   ServerMember,
   ServerMemberRemovePayload,
   ServerSummary,
+  UserUpdatePayload,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
 import { useVoiceStore } from './voice';
@@ -318,6 +319,26 @@ export const useServersStore = create<ServersState>()((set, get) => ({
                 selectedServer: {
                   ...s.selectedServer,
                   members: s.selectedServer.members.filter((m) => m.userId !== userId),
+                },
+              }
+            : {},
+        );
+        return;
+      }
+      case 'USER_UPDATE': {
+        // Phase 15: Profiländerung (Status/Avatar) in der Mitgliederliste des
+        // ausgewählten Servers nachziehen (Freunde/DMs machen ihre Stores selbst).
+        const { user } = d as UserUpdatePayload;
+        set((s) =>
+          s.selectedServer
+            ? {
+                selectedServer: {
+                  ...s.selectedServer,
+                  members: s.selectedServer.members.map((m) =>
+                    m.userId === user.id
+                      ? { ...m, avatarUrl: user.avatarUrl, status: user.status }
+                      : m,
+                  ),
                 },
               }
             : {},

@@ -1,19 +1,25 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Req,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import type { ChannelInfo, ServerDetails, ServerSummary } from '@parley/shared';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard';
 import type { AccessTokenPayload } from '../auth/auth.service';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { ServersService } from './servers.service';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
@@ -101,5 +107,37 @@ export class ServersController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     return this.servers.deleteChannel(id, user.sub);
+  }
+
+  /** Server-Icon hochladen (ManageServer, Phase 15) – roher Bild-Body. */
+  @Post('servers/:id/icon')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ limit: 10, windowS: 60 })
+  uploadIcon(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+  ): Promise<ServerSummary> {
+    if (!Buffer.isBuffer(req.body)) {
+      throw new BadRequestException('Bild als application/octet-stream senden');
+    }
+    return this.servers.setIcon(id, user.sub, req.body);
+  }
+}
+
+/**
+ * Öffentliche Icon-Auslieferung (Phase 15) – ohne AuthGuard, weil <img src>
+ * keine Bearer-Header senden kann (gleiche Begründung wie beim Avatar).
+ */
+@Controller('servers')
+export class ServersPublicController {
+  constructor(private readonly servers: ServersService) {}
+
+  @Get(':id/icon')
+  // iconUrl trägt eine ?v=-Query (Cache-Busting) → aggressiv cachebar.
+  @Header('Cache-Control', 'public, max-age=31536000, immutable')
+  async getIcon(@Param('id', ParseUUIDPipe) id: string): Promise<StreamableFile> {
+    const { stream, sizeBytes, contentType } = await this.servers.getIconStream(id);
+    return new StreamableFile(stream, { type: contentType, length: sizeBytes });
   }
 }

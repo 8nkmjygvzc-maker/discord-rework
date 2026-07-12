@@ -105,6 +105,10 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   joinVoice: async (channel) => {
     const self = useAuthStore.getState().user;
     if (!self) return;
+    // Bereits in DIESEM Kanal (verbunden oder verbindend)? Nichts tun – ein
+    // erneuter Join würde die SFU-Verbindung ersetzen und deren onClosed-
+    // Handler die Session abräumen („man fliegt raus beim Draufklicken").
+    if (get().activeChannelId === channel.id && get().status !== 'error') return;
     // Bereits in einem anderen Kanal? Erst sauber trennen (Medien + Roster).
     // Silent: beim Kanalwechsel soll nur der Connect-Sound erklingen.
     if (get().activeChannelId && get().activeChannelId !== channel.id) {

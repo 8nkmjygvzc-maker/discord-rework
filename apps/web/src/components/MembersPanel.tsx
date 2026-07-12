@@ -12,6 +12,7 @@ import { useAuthStore } from '../store/auth';
 import { useVoiceStore } from '../store/voice';
 import { ApiError } from '../lib/api';
 import { memberRoleColor } from '../lib/roleColors';
+import Avatar from './Avatar';
 import ModerationDialog from './ModerationDialog';
 
 /** Auswahl-Dauern für die Auszeit (Timeout), 60 s … 1 Woche. */
@@ -144,46 +145,58 @@ export default function MembersPanel() {
           return (
             <li key={member.userId} className={online ? '' : 'opacity-50'}>
               <div className="flex items-center gap-2 rounded px-1 py-1.5">
-                <div className="relative">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-sm font-bold text-white">
-                    {member.username.slice(0, 1).toUpperCase()}
-                  </div>
+                <div className="relative shrink-0">
+                  <Avatar
+                    name={member.username}
+                    avatarUrl={member.avatarUrl}
+                    sizeClass="h-8 w-8 text-sm"
+                  />
                   <span
                     className={`absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-zinc-900 ${
                       online ? 'bg-emerald-500' : 'bg-zinc-600'
                     }`}
                   />
                 </div>
-                <span
-                  className="truncate text-sm text-zinc-300"
-                  style={nameColor ? { color: nameColor } : undefined}
-                >
-                  {member.nickname ?? member.username}
-                </span>
-                {timedOut && (
-                  <span
-                    title={`In Auszeit bis ${new Date(member.timeoutUntil!).toLocaleString('de-DE')}`}
-                    className="text-xs"
-                  >
-                    ⏳
-                  </span>
-                )}
-                {member.roleIds.length > 0 && (
-                  <span className="flex min-w-0 gap-1">
-                    {member.roleIds.map((roleId) => {
-                      const role = server.roles.find((r) => r.id === roleId);
-                      return role ? (
-                        <span
-                          key={roleId}
-                          className="truncate rounded bg-zinc-800 px-1 text-[10px] text-zinc-400"
-                          style={role.color ? { color: role.color } : undefined}
-                        >
-                          {role.name}
-                        </span>
-                      ) : null;
-                    })}
-                  </span>
-                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span
+                      className="truncate text-sm text-zinc-300"
+                      style={nameColor ? { color: nameColor } : undefined}
+                    >
+                      {member.nickname ?? member.username}
+                    </span>
+                    {timedOut && (
+                      <span
+                        title={`In Auszeit bis ${new Date(member.timeoutUntil!).toLocaleString('de-DE')}`}
+                        className="text-xs"
+                      >
+                        ⏳
+                      </span>
+                    )}
+                    {member.roleIds.length > 0 && (
+                      <span className="flex min-w-0 gap-1">
+                        {member.roleIds.map((roleId) => {
+                          const role = server.roles.find((r) => r.id === roleId);
+                          return role ? (
+                            <span
+                              key={roleId}
+                              className="truncate rounded bg-zinc-800 px-1 text-[10px] text-zinc-400"
+                              style={role.color ? { color: role.color } : undefined}
+                            >
+                              {role.name}
+                            </span>
+                          ) : null;
+                        })}
+                      </span>
+                    )}
+                  </div>
+                  {/* Status-Text (Phase 15) – jetzt für ALLE sichtbar, nicht nur für einen selbst. */}
+                  {member.status && (
+                    <p className="truncate text-xs text-zinc-500" title={member.status}>
+                      {member.status}
+                    </p>
+                  )}
+                </div>
                 <span className="ml-auto flex items-center gap-1">
                   {isOwnerMember && (
                     <span title="Server-Eigentümer" className="text-xs">

@@ -1,8 +1,10 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
 import { disablePush, enablePush, pushStatus, type PushStatus } from '../lib/push';
+import { uploadAvatar } from '../lib/profileImage';
+import Avatar from '../components/Avatar';
 
 interface ProfilePageProps {
   /** Zurück zur Hauptansicht (gesetzt, sobald es eine gibt – ab Phase 3). */
@@ -21,6 +23,28 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const [pending, setPending] = useState(false);
   const [push, setPush] = useState<PushStatus | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  /** Profilbild wählen → clientseitig verkleinern → hochladen (Phase 15). */
+  async function onAvatarSelected(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setFeedback(null);
+    setAvatarBusy(true);
+    try {
+      await uploadAvatar(file);
+      setFeedback({ kind: 'ok', text: 'Profilbild aktualisiert' });
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        text:
+          err instanceof ApiError || err instanceof Error ? err.message : 'Upload fehlgeschlagen',
+      });
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
 
   useEffect(() => {
     void pushStatus().then(setPush);
@@ -83,10 +107,36 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
           </button>
         )}
         <div className="flex items-center gap-4">
-          {/* Platzhalter-Avatar: Initiale auf Farbfläche; Uploads kommen in Phase 8 */}
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-600 text-2xl font-bold">
-            {user.username.slice(0, 1).toUpperCase()}
-          </div>
+          {/* Profilbild (Phase 15): Klick öffnet die Dateiauswahl. */}
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            data-testid="avatar-input"
+            onChange={(e) => {
+              void onAvatarSelected(e.target.files);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            title="Profilbild ändern"
+            disabled={avatarBusy}
+            onClick={() => avatarInputRef.current?.click()}
+            className="group relative shrink-0 rounded-full transition hover:scale-105 disabled:opacity-60"
+            data-testid="avatar-button"
+          >
+            <Avatar
+              name={user.username}
+              avatarUrl={user.avatarUrl}
+              sizeClass="h-16 w-16 text-2xl"
+              fallbackClass="bg-indigo-600"
+            />
+            <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/60 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100">
+              {avatarBusy ? '…' : 'Ändern'}
+            </span>
+          </button>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{user.username}</h1>
             <p className="text-sm text-zinc-400">{user.email}</p>

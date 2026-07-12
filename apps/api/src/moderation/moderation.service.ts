@@ -17,13 +17,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { PermissionsService } from '../roles/permissions.service';
 import { VoiceService } from '../voice/voice.service';
-import { toServerMember } from '../servers/servers.service';
+import { MEMBER_USER_SELECT, toServerMember } from '../servers/servers.service';
 
 /** Wie viele Audit-Log-Einträge eine Abfrage höchstens liefert. */
 const AUDIT_LOG_LIMIT = 100;
 
 type MemberWithUser = Membership & {
-  user: Pick<User, 'username'>;
+  user: Pick<User, 'username' | 'avatarUrl' | 'status'>;
   roles: { roleId: string }[];
 };
 
@@ -153,7 +153,7 @@ export class ModerationService {
     const updated = await this.prisma.membership.update({
       where: { userId_serverId: { userId: targetUserId, serverId } },
       data: { timeoutUntil: until },
-      include: { user: { select: { username: true } }, roles: { select: { roleId: true } } },
+      include: { user: { select: MEMBER_USER_SELECT }, roles: { select: { roleId: true } } },
     });
     // Auszeit trennt auch aus dem Voice (kann nicht mehr sprechen).
     await this.voice.forceDisconnect(targetUserId, serverId);
@@ -176,7 +176,7 @@ export class ModerationService {
     const updated = await this.prisma.membership.update({
       where: { userId_serverId: { userId: targetUserId, serverId } },
       data: { timeoutUntil: null },
-      include: { user: { select: { username: true } }, roles: { select: { roleId: true } } },
+      include: { user: { select: MEMBER_USER_SELECT }, roles: { select: { roleId: true } } },
     });
     await this.broadcastMemberUpdate(serverId, updated);
     await this.writeAudit(
@@ -245,7 +245,7 @@ export class ModerationService {
     }
     const target = await this.prisma.membership.findUnique({
       where: { userId_serverId: { userId: targetUserId, serverId } },
-      include: { user: { select: { username: true } }, roles: { select: { roleId: true } } },
+      include: { user: { select: MEMBER_USER_SELECT }, roles: { select: { roleId: true } } },
     });
     if (!target) throw new NotFoundException('Mitglied nicht gefunden');
 

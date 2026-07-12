@@ -5,11 +5,14 @@ import {
   permissionsFromString,
   VoiceState,
 } from '@parley/shared';
+import { useRef, useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
 import { useVoiceStore } from '../store/voice';
 import { useNoticesStore } from '../store/notices';
 import { ApiError } from '../lib/api';
+import { uploadServerIcon } from '../lib/profileImage';
+import Avatar from './Avatar';
 import UserFooter from './UserFooter';
 import VoicePanel from './VoicePanel';
 
@@ -52,6 +55,7 @@ export default function ChannelSidebar({
   const myPerms = server ? permissionsFromString(server.myPermissions) : 0n;
   const canManageChannels = hasPermission(myPerms, Permissions.ManageChannels);
   const canManageRoles = hasPermission(myPerms, Permissions.ManageRoles);
+  const canManageServer = hasPermission(myPerms, Permissions.ManageServer);
   const canInvite = hasPermission(myPerms, Permissions.CreateInvite);
 
   const textChannels = server?.channels.filter((c) => c.type === 'TEXT') ?? [];
@@ -61,7 +65,8 @@ export default function ChannelSidebar({
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-zinc-900">
       {/* Server-Kopf */}
-      <header className="flex items-center justify-between border-b border-zinc-950/50 px-4 py-3 shadow">
+      <header className="flex items-center justify-between gap-2 border-b border-zinc-950/50 px-3 py-3 shadow">
+        {server && <ServerIcon server={server} canManage={canManageServer} />}
         <h1 className="truncate font-bold text-zinc-100">{server?.name ?? 'Kein Server'}</h1>
         {server && canInvite && (
           <button
@@ -167,6 +172,68 @@ export default function ChannelSidebar({
       <VoicePanel />
       <UserFooter onOpenProfile={onOpenProfile} />
     </aside>
+  );
+}
+
+/**
+ * Server-Icon im Kopf der Sidebar (Phase 15). Mit ManageServer öffnet ein
+ * Klick die Dateiauswahl zum Hochladen; das SERVER_UPDATE-Event verteilt die
+ * neue iconUrl an alle Mitglieder (auch im ServerDock).
+ */
+function ServerIcon({
+  server,
+  canManage,
+}: {
+  server: { id: string; name: string; iconUrl: string | null };
+  canManage: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSelected(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setBusy(true);
+    try {
+      await uploadServerIcon(server.id, file);
+    } catch (err) {
+      useNoticesStore
+        .getState()
+        .pushNotice(
+          'Server-Icon',
+          err instanceof ApiError || err instanceof Error ? err.message : 'Upload fehlgeschlagen',
+        );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const icon = <Avatar name={server.name} avatarUrl={server.iconUrl} sizeClass="h-7 w-7 text-xs" />;
+  if (!canManage) return icon;
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        data-testid="server-icon-input"
+        onChange={(e) => {
+          void onSelected(e.target.files);
+          e.target.value = '';
+        }}
+      />
+      <button
+        type="button"
+        title="Server-Icon ändern"
+        disabled={busy}
+        onClick={() => inputRef.current?.click()}
+        className="shrink-0 rounded-full transition hover:scale-110 disabled:opacity-60"
+        data-testid="server-icon-button"
+      >
+        {icon}
+      </button>
+    </>
   );
 }
 
@@ -289,15 +356,20 @@ function VoiceParticipant({
   const screenOn = isSelf ? selfScreenOn : state.screenOn;
   // Sprech-Erkennung (Phase 15): grüner Ring um den Avatar, solange der Nutzer spricht.
   const speaking = useVoiceStore((s) => s.speaking[state.userId] === true);
+  // Profilbild aus der Mitgliederliste des ausgewählten Servers (Phase 15).
+  const avatarUrl = useServersStore(
+    (s) => s.selectedServer?.members.find((m) => m.userId === state.userId)?.avatarUrl ?? null,
+  );
   return (
     <li className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-zinc-400">
-      <span
-        title={speaking ? 'Spricht' : undefined}
-        className={`flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700/70 text-[10px] font-bold text-white ${
-          speaking ? 'ring-2 ring-emerald-400' : ''
-        }`}
-      >
-        {state.username.slice(0, 1).toUpperCase()}
+      <span title={speaking ? 'Spricht' : undefined} className="shrink-0">
+        <Avatar
+          name={state.username}
+          avatarUrl={avatarUrl}
+          sizeClass="h-5 w-5 text-[10px]"
+          fallbackClass="bg-emerald-700/70"
+          className={speaking ? 'ring-2 ring-emerald-400' : ''}
+        />
       </span>
       <span className={`truncate ${speaking ? 'text-zinc-100' : ''}`}>{state.username}</span>
       <span className="ml-auto flex items-center gap-0.5">

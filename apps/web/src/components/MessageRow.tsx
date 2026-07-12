@@ -3,6 +3,7 @@ import type { DecodedMessageContent, MessageInfo } from '@parley/shared';
 import type { ReactionEventState } from '../store/messages';
 import { splitMentions } from '../lib/mentions';
 import AttachmentView from './AttachmentView';
+import Avatar from './Avatar';
 
 /** Schnellauswahl fürs Reaktions-Popover – bewusst klein für v1. */
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '✅', '👎'];
@@ -40,6 +41,8 @@ interface MessageRowProps {
   flash: boolean;
   /** Rollenfarbe des Absenders (höchste Rolle mit Farbe, Phase 15). */
   senderColor: string | null;
+  /** Profilbild des Absenders (Phase 15) – null = Initialen-Platzhalter. */
+  senderAvatarUrl: string | null;
   onToggleReaction: (emoji: string, mine: boolean) => void;
   onReply: () => void;
   onOpenThread: () => void;
@@ -65,6 +68,7 @@ export default function MessageRow({
   hasThread,
   flash,
   senderColor,
+  senderAvatarUrl,
   onToggleReaction,
   onReply,
   onOpenThread,
@@ -129,7 +133,7 @@ export default function MessageRow({
   return (
     <li
       data-message-id={message.id}
-      className={`group relative flex gap-3 rounded px-1 transition-colors ${grouped ? '-mt-2' : ''} ${
+      className={`group animate-msg-in relative flex gap-3 rounded px-1 transition-colors ${grouped ? '-mt-2' : ''} ${
         flash
           ? 'bg-indigo-500/20'
           : mentionsMe
@@ -139,9 +143,7 @@ export default function MessageRow({
     >
       <div className="w-9 shrink-0">
         {!grouped && (
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-700 font-bold text-white">
-            {message.senderUsername.slice(0, 1).toUpperCase()}
-          </div>
+          <Avatar name={message.senderUsername} avatarUrl={senderAvatarUrl} sizeClass="h-9 w-9" />
         )}
       </div>
       <div className="min-w-0 flex-1">

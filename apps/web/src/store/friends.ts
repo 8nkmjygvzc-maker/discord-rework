@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { FriendsList } from '@parley/shared';
+import type { FriendsList, PublicUser } from '@parley/shared';
 import { useAuthStore } from './auth';
 
 /**
@@ -19,6 +19,8 @@ interface FriendsState {
   remove: (userId: string) => Promise<void>;
   block: (userId: string) => Promise<void>;
   unblock: (userId: string) => Promise<void>;
+  /** USER_UPDATE (Phase 15): Status/Avatar eines Nutzers in place aktualisieren. */
+  applyUserUpdate: (user: PublicUser) => void;
   reset: () => void;
 }
 
@@ -59,6 +61,19 @@ export const useFriendsStore = create<FriendsState>()((set) => ({
   unblock: async (userId) => {
     await authFetch<void>(`/api/friends/${userId}/block`, { method: 'DELETE' });
   },
+
+  applyUserUpdate: (user) =>
+    set((s) => {
+      const patch = (u: PublicUser): PublicUser => (u.id === user.id ? { ...u, ...user } : u);
+      return {
+        list: {
+          friends: s.list.friends.map(patch),
+          incoming: s.list.incoming.map((r) => ({ ...r, user: patch(r.user) })),
+          outgoing: s.list.outgoing.map((r) => ({ ...r, user: patch(r.user) })),
+          blocked: s.list.blocked.map(patch),
+        },
+      };
+    }),
 
   reset: () => set({ list: EMPTY, loaded: false }),
 }));

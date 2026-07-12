@@ -20,3 +20,10 @@ export interface UpdateProfileRequest {
   status?: string;
   avatarUrl?: string;
 }
+
+/**
+ * Maximale Größe hochgeladener Profil-/Server-Bilder (Phase 15). Der Client
+ * skaliert vor dem Upload auf 256 px herunter – das Limit ist nur die harte
+ * serverseitige Grenze gegen Missbrauch.
+ */
+export const MAX_PROFILE_IMAGE_BYTES = 2 * 1024 * 1024;

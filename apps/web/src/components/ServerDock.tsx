@@ -17,10 +17,11 @@ interface ServerDockProps {
 
 /**
  * Unten mittig zentriertes Dock: links fix der Freunde-Tab, rechts fix der
- * kombinierte Erstellen/Beitreten-Button, dazwischen 5 Server-Slots. Kein
- * Panel-Hintergrund – nur die frei schwebenden Icons. Bei mehr als 5 Servern
- * verschiebt man das sichtbare Fenster, indem man die Server-Kreise mit der
- * Maus horizontal zieht (oder per Mausrad über dem Dock).
+ * kombinierte Erstellen/Beitreten-Button, dazwischen 5 Server-Slots. Bewusst
+ * OHNE Panel/Bogen-Hintergrund – nur die frei schwebenden Icons (Phase 15,
+ * Nutzerwunsch). Bei mehr als 5 Servern blättert das Mausrad das sichtbare
+ * Fenster weiter; eine schmale Scroll-Leiste unter den Icons erscheint nur
+ * dann und lässt sich ziehen.
  *
  * Das Dock ist standardmäßig verborgen und slidet erst hoch, wenn die Maus
  * unten in die Bildschirmmitte fährt (unsichtbare Auslöse-Zone). Es liegt als
@@ -112,8 +113,9 @@ export default function ServerDock({
 
   const visibleSlots = Array.from({ length: SLOTS }, (_, i) => servers[offset + i] ?? null);
 
+  // Hover: leichtes Anwachsen + Anheben (Dock-Gefühl ohne Panel dahinter).
   const circle =
-    'flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold text-white shadow-md transition-colors';
+    'flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold text-white shadow-lg shadow-black/40 transition-all duration-150 hover:-translate-y-1.5 hover:scale-110';
 
   return (
     <nav
@@ -121,8 +123,8 @@ export default function ServerDock({
       onWheel={handleWheel}
       // Tastatur-Fokus (Tab) blendet das Dock ebenfalls ein.
       onFocusCapture={() => setVisible(true)}
-      className={`absolute bottom-0 left-1/2 z-40 -translate-x-1/2 rounded-t-3xl border border-b-0 border-zinc-800 bg-zinc-950/95 px-8 pt-3 shadow-2xl backdrop-blur transition-transform duration-300 ease-out ${
-        visible ? 'translate-y-0' : 'translate-y-full'
+      className={`absolute bottom-0 left-1/2 z-40 -translate-x-1/2 px-8 pb-3 pt-4 transition-all duration-300 ease-out ${
+        visible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
       }`}
       data-testid="server-dock"
     >
@@ -151,28 +153,30 @@ export default function ServerDock({
             )}
           </button>
 
-          {visibleSlots.map((server, i) =>
+          {visibleSlots.map((server) =>
             server ? (
               <button
                 key={server.id}
                 type="button"
                 title={server.name}
                 onClick={() => onSelectServer(server.id)}
-                className={`${circle} ${
+                className={`${circle} overflow-hidden ${
                   !homeActive && server.id === selectedId
                     ? 'bg-indigo-600'
                     : 'bg-zinc-700 hover:bg-indigo-500'
                 }`}
               >
-                {server.name.slice(0, 1).toUpperCase()}
+                {server.iconUrl ? (
+                  <img
+                    src={server.iconUrl}
+                    alt={server.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  server.name.slice(0, 1).toUpperCase()
+                )}
               </button>
-            ) : (
-              <div
-                key={`slot-${i}`}
-                title="Freier Server-Slot"
-                className="h-14 w-14 rounded-full border-2 border-dashed border-zinc-700/70 bg-zinc-800/40"
-              />
-            ),
+            ) : null,
           )}
 
           <div className="relative">
@@ -223,27 +227,11 @@ export default function ServerDock({
           </div>
         </div>
 
-        {/* Bogen (Schale) unter den Kreisen, mit Scroll-Leiste darin. */}
-        <div className="relative -mt-3 h-16 w-[560px]">
-          <svg
-            viewBox="0 0 560 64"
-            preserveAspectRatio="none"
-            className="h-full w-full"
-            aria-hidden
-          >
-            <defs>
-              <linearGradient id="dock-hull" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stopColor="#3f3f46" />
-                <stop offset="1" stopColor="#18181b" />
-              </linearGradient>
-            </defs>
-            <path d="M0 12 Q280 0 560 12 L554 22 Q280 68 6 22 Z" fill="url(#dock-hull)" />
-            <path d="M0 12 Q280 0 560 12" fill="none" stroke="#52525b" strokeWidth="1.5" />
-          </svg>
-
+        {/* Schmale Scroll-Leiste unter den Icons – nur bei mehr als 5 Servern. */}
+        {scrollable && (
           <div
             ref={trackRef}
-            title={scrollable ? 'Server durchscrollen' : undefined}
+            title="Server durchscrollen"
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
               scrubToPointer(e.clientX);
@@ -251,19 +239,15 @@ export default function ServerDock({
             onPointerMove={(e) => {
               if (e.buttons & 1) scrubToPointer(e.clientX);
             }}
-            className={`absolute top-[26px] left-1/2 h-2 w-72 -translate-x-1/2 touch-none rounded-full bg-zinc-900/80 ${
-              scrollable ? 'cursor-pointer' : ''
-            }`}
+            className="relative mt-2 h-1.5 w-72 cursor-pointer touch-none rounded-full bg-zinc-700/40"
             data-testid="server-scrollbar"
           >
             <div
-              className={`absolute top-0 h-full rounded-full transition-[left] duration-100 ${
-                scrollable ? 'bg-zinc-500 hover:bg-zinc-400' : 'bg-zinc-700/60'
-              }`}
+              className="absolute top-0 h-full rounded-full bg-zinc-400/80 transition-[left] duration-100 hover:bg-zinc-300"
               style={{ width: `${thumbWidthPct}%`, left: `${thumbLeftPct}%` }}
             />
           </div>
-        </div>
+        )}
       </div>
     </nav>
   );

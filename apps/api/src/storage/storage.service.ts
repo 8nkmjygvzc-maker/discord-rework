@@ -35,12 +35,25 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  putObject(objectKey: string, data: Buffer): Promise<unknown> {
-    return this.client.putObject(this.bucket, objectKey, data, data.length);
+  putObject(objectKey: string, data: Buffer, contentType?: string): Promise<unknown> {
+    return this.client.putObject(
+      this.bucket,
+      objectKey,
+      data,
+      data.length,
+      contentType ? { 'Content-Type': contentType } : undefined,
+    );
   }
 
   getObjectStream(objectKey: string): Promise<Readable> {
     return this.client.getObject(this.bucket, objectKey);
+  }
+
+  /** Größe + gespeicherter Content-Type (Profil-/Server-Bilder, Phase 15). */
+  async statObject(objectKey: string): Promise<{ sizeBytes: number; contentType: string | null }> {
+    const stat = await this.client.statObject(this.bucket, objectKey);
+    const contentType = (stat.metaData as Record<string, string> | undefined)?.['content-type'];
+    return { sizeBytes: stat.size, contentType: contentType ?? null };
   }
 
   removeObject(objectKey: string): Promise<void> {

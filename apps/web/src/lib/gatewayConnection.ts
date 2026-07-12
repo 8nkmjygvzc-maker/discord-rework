@@ -11,6 +11,7 @@ import type {
   ServerSelfRemovedPayload,
   SoundboardPlayPayload,
   SoundboardUpdatePayload,
+  UserUpdatePayload,
   VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { GatewayClient } from './gateway';
@@ -74,6 +75,21 @@ const client = new GatewayClient({
           .getState()
           .handleSoundboardUpdate((d as SoundboardUpdatePayload).serverId);
         return;
+      case 'USER_UPDATE': {
+        // Profiländerung (Status/Avatar, Phase 15) in alle Listen einspielen.
+        const { user } = d as UserUpdatePayload;
+        useFriendsStore.getState().applyUserUpdate(user);
+        useDmsStore.getState().applyUserUpdate(user);
+        useServersStore.getState().handleGatewayEvent(t, d);
+        // Eigenes Profil (anderer Tab/Gerät): auch den Auth-Store nachziehen.
+        const me = useAuthStore.getState().user;
+        if (me && me.id === user.id) {
+          useAuthStore.setState({
+            user: { ...me, avatarUrl: user.avatarUrl, status: user.status },
+          });
+        }
+        return;
+      }
       case 'MESSAGE_CREATE': {
         const { message, context } = d as MessageCreatePayload;
         // Kanal-Label für Benachrichtigungen merken (Phase 15) – nötig für

@@ -43,3 +43,103 @@ body,
 .chat-scrollbar::-webkit-scrollbar-thumb:active {
   background-color: rgb(161 161 170 / 0.85);
 }
+
+/* --- Animationen (Phase 15) ------------------------------------------------
+   Dezent und GPU-freundlich (nur transform/opacity, keine Layout-Sprünge).
+   prefers-reduced-motion schaltet alles ab. */
+
+/* Neue Nachrichten gleiten sanft von unten ein. */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-msg-in {
+  animation: msg-in 0.18s ease-out both;
+}
+
+/* Ansichten (Server-/Home-Wechsel, Panels, Dialoge) blenden weich ein. */
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-view-in {
+  animation: view-in 0.22s ease-out both;
+}
+
+/* Modale/Popover ploppen leicht auf. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-pop-in {
+  animation: pop-in 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+/* Sanft pulsierender Online-Punkt. */
+@keyframes presence-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(16 185 129 / 0);
+  }
+}
+.animate-presence {
+  animation: presence-pulse 2.4s ease-in-out infinite;
+}
+
+/* Animierter Verlaufs-Hintergrund für die Login-/Registrierungs-Seite. */
+@keyframes aurora {
+  0%,
+  100% {
+    background-position:
+      0% 50%,
+      100% 50%;
+  }
+  50% {
+    background-position:
+      100% 50%,
+      0% 50%;
+  }
+}
+.auth-aurora {
+  background:
+    radial-gradient(60% 80% at 20% 20%, rgb(79 70 229 / 0.28), transparent 60%),
+    radial-gradient(60% 80% at 80% 80%, rgb(168 85 247 / 0.22), transparent 60%),
+    radial-gradient(40% 60% at 70% 20%, rgb(6 182 212 / 0.14), transparent 60%);
+  background-size:
+    180% 180%,
+    180% 180%,
+    160% 160%;
+  animation: aurora 16s ease-in-out infinite;
+}
+
+/* Nutzer respektieren, die weniger Bewegung wollen. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-msg-in,
+  .animate-view-in,
+  .animate-pop-in,
+  .animate-presence,
+  .auth-aurora {
+    animation: none;
+  }
+}

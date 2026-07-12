@@ -16,6 +16,10 @@ export interface ServerMember {
   userId: string;
   username: string;
   nickname: string | null;
+  /** Profilbild (Phase 15) – null = Initialen-Platzhalter. */
+  avatarUrl: string | null;
+  /** Status-Text des Nutzers („Was machst du gerade?“, Phase 15). */
+  status: string;
   joinedAt: string;
   /** Zugewiesene Rollen (ohne die implizite Standardrolle). */
   roleIds: string[];

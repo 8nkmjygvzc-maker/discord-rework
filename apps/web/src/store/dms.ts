@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DmChannelInfo } from '@parley/shared';
+import type { DmChannelInfo, PublicUser } from '@parley/shared';
 import { useAuthStore } from './auth';
 
 /**
@@ -31,6 +31,8 @@ interface DmsState {
   setActiveDm: (channelId: string | null) => void;
   /** Live eingetroffene fremde DM-Nachricht als ungelesen zählen. */
   markUnread: (channelId: string) => void;
+  /** USER_UPDATE (Phase 15): Status/Avatar des DM-Partners aktualisieren. */
+  applyUserUpdate: (user: PublicUser) => void;
   reset: () => void;
 }
 
@@ -106,6 +108,13 @@ export const useDmsStore = create<DmsState>()((set, get) => ({
     if (!s.channels.some((c) => c.id === channelId)) return;
     set({ unread: { ...s.unread, [channelId]: (s.unread[channelId] ?? 0) + 1 } });
   },
+
+  applyUserUpdate: (user) =>
+    set((s) => ({
+      channels: s.channels.map((c) =>
+        c.otherUser.id === user.id ? { ...c, otherUser: { ...c.otherUser, ...user } } : c,
+      ),
+    })),
 
   reset: () =>
     set({ channels: [], loaded: false, selectedDmId: null, unread: {}, activeDmId: null }),

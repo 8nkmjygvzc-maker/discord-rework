@@ -88,6 +88,20 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     return map;
   }, [dm, members, roles]);
 
+  /** Profilbild je Absender (Phase 15): Server-Mitglieder bzw. DM-Teilnehmer. */
+  const dmChannels = useDmsStore((s) => s.channels);
+  const senderAvatars = useMemo(() => {
+    const map = new Map<string, string | null>();
+    if (dm) {
+      if (user) map.set(user.id, user.avatarUrl);
+      const other = dmChannels.find((c) => c.id === channel.id)?.otherUser;
+      if (other) map.set(other.id, other.avatarUrl);
+    } else {
+      for (const member of members ?? []) map.set(member.userId, member.avatarUrl);
+    }
+    return map;
+  }, [dm, dmChannels, channel.id, members, user]);
+
   // Reaktions-Events sind „Nachrichten“, gehören aber nicht in den Verlauf.
   const conversation = useMemo(
     () => messages.filter((m) => !decrypted[m.id]?.reaction),
@@ -188,10 +202,16 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   }
 
   function addFiles(selected: FileList | null) {
-    if (!selected) return;
+    if (!selected || selected.length === 0) return;
+    // SOFORT kopieren: input.files ist eine LIVE-Liste – der onChange-Handler
+    // leert den Input direkt nach diesem Aufruf (e.target.value = ''), und
+    // Reacts State-Updater läuft erst danach. Ohne Kopie wäre die Auswahl
+    // dann bereits leer und Anhänge kamen nie im Draft an (Bug: „Bilder
+    // schicken geht nicht").
+    const incoming = Array.from(selected);
     setError(null);
     setFiles((prev) => {
-      const next = [...prev, ...Array.from(selected)];
+      const next = [...prev, ...incoming];
       if (next.length > MAX_FILES_PER_MESSAGE) {
         setError(`Höchstens ${MAX_FILES_PER_MESSAGE} Dateien pro Nachricht`);
         return prev;
@@ -326,7 +346,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     !dm && hasPermission(permissionsFromString(myPermissions), Permissions.ManageMessages);
 
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <main className="animate-view-in flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
         <span className="text-zinc-500">{dm ? '@' : '#'}</span>
         <span className="font-semibold">{channel.name}</span>
@@ -453,6 +473,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
                 hasThread={childrenByParent.has(msg.id) || !!content?.replyTo}
                 flash={flashId === msg.id}
                 senderColor={senderColors.get(msg.senderId) ?? null}
+                senderAvatarUrl={senderAvatars.get(msg.senderId) ?? null}
                 onToggleReaction={(emoji, mine) => toggleReaction(msg.id, emoji, mine)}
                 onReply={() => startReply(msg.id)}
                 onOpenThread={() => setThreadRootId(msg.id)}

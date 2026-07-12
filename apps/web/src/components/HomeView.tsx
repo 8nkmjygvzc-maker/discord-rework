@@ -4,6 +4,7 @@ import { useDmsStore } from '../store/dms';
 import { useFriendsStore } from '../store/friends';
 import { useServersStore } from '../store/servers';
 import { usePresenceStore } from '../store/presence';
+import Avatar from './Avatar';
 import ChatView from './ChatView';
 import FriendsPanel from './FriendsPanel';
 import UserFooter from './UserFooter';
@@ -88,17 +89,29 @@ export default function HomeView({ onOpenProfile, onCreateServer, onJoinServer }
                       : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                   }`}
                 >
-                  <span className="relative">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-700 text-xs font-bold text-white">
-                      {dm.otherUser.username.slice(0, 1).toUpperCase()}
-                    </span>
+                  <span className="relative shrink-0">
+                    <Avatar
+                      name={dm.otherUser.username}
+                      avatarUrl={dm.otherUser.avatarUrl}
+                      sizeClass="h-7 w-7 text-xs"
+                    />
                     <span
                       className={`absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-zinc-900 ${
                         onlineIds.has(dm.otherUser.id) ? 'bg-emerald-500' : 'bg-zinc-600'
                       }`}
                     />
                   </span>
-                  <span className="truncate">{dm.otherUser.username}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{dm.otherUser.username}</span>
+                    {dm.otherUser.status && (
+                      <span
+                        className="block truncate text-[11px] text-zinc-500"
+                        title={dm.otherUser.status}
+                      >
+                        {dm.otherUser.status}
+                      </span>
+                    )}
+                  </span>
                   {(unread[dm.id] ?? 0) > 0 && (
                     <span
                       title={`${unread[dm.id]} ungelesene Nachricht(en)`}
