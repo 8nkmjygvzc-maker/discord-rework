@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { useServersStore } from '../store/servers';
+import { useSoundboardStore } from '../store/soundboard';
 import { useVoiceStore } from '../store/voice';
+import SoundboardDialog from './SoundboardDialog';
 
 /**
  * Sprachverbindungs-Panel (Phase 10), erscheint über dem Nutzer-Panel, sobald
@@ -9,6 +12,7 @@ import { useVoiceStore } from '../store/voice';
 export default function VoicePanel() {
   const status = useVoiceStore((s) => s.status);
   const activeChannelId = useVoiceStore((s) => s.activeChannelId);
+  const activeServerId = useVoiceStore((s) => s.activeServerId);
   const selfMuted = useVoiceStore((s) => s.selfMuted);
   const selfDeafened = useVoiceStore((s) => s.selfDeafened);
   const selfCameraOn = useVoiceStore((s) => s.selfCameraOn);
@@ -20,6 +24,9 @@ export default function VoicePanel() {
   const toggleCamera = useVoiceStore((s) => s.toggleCamera);
   const toggleScreenShare = useVoiceStore((s) => s.toggleScreenShare);
   const leaveVoice = useVoiceStore((s) => s.leaveVoice);
+  const nowPlaying = useSoundboardStore((s) => s.nowPlaying);
+  const loadSoundboard = useSoundboardStore((s) => s.load);
+  const [soundboardOpen, setSoundboardOpen] = useState(false);
 
   // Kanalnamen aus dem gerade gewählten Server ableiten (best effort – bei
   // anderem Server steht nur „Sprachkanal“).
@@ -119,6 +126,28 @@ export default function VoicePanel() {
           {selfScreenOn ? '🖥️ Teilt' : '🖥️ Teilen'}
         </button>
       </div>
+
+      <button
+        type="button"
+        disabled={connecting}
+        title="Soundboard öffnen"
+        onClick={() => {
+          if (activeServerId) void loadSoundboard(activeServerId);
+          setSoundboardOpen(true);
+        }}
+        className="mt-2 w-full rounded bg-zinc-800 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        🎶 Soundboard
+      </button>
+
+      {/* „X spielt Y“ – auch sichtbar, wenn das Soundboard geschlossen ist. */}
+      {nowPlaying && (
+        <p className="mt-2 truncate text-xs text-emerald-400">
+          🔊 {nowPlaying.username}: {nowPlaying.label}
+        </p>
+      )}
+
+      {soundboardOpen && <SoundboardDialog onClose={() => setSoundboardOpen(false)} />}
     </div>
   );
 }

@@ -152,6 +152,10 @@ export class ServersService {
     });
     await this.prisma.server.delete({ where: { id: serverId } });
     this.removeChannelBlobs(channels.map((c) => c.id));
+    // Soundboard-Blobs liegen unter einem Server-Präfix (kein Kanal-Bezug).
+    void this.storage.removeAllWithPrefix(`soundboard/${serverId}/`).catch((err: unknown) => {
+      this.logger.warn(`Soundboard-Blobs von Server ${serverId} nicht aufräumbar: ${String(err)}`);
+    });
     await this.gateway.publishDispatch('SERVER_DELETE', { serverId }, memberIds);
   }
 

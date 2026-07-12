@@ -40,6 +40,7 @@ model User {
   bans            Ban[]              @relation("BannedUser")
   auditActions    AuditLogEntry[]    @relation("AuditActor")
   auditTargeted   AuditLogEntry[]    @relation("AuditTarget")
+  soundboardSounds SoundboardSound[] @relation("UploadedSounds")
 }
 
 // Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –
@@ -116,12 +117,13 @@ model Server {
   iconUrl   String?
   createdAt DateTime @default(now())
 
-  members  Membership[]
-  channels Channel[]
-  roles    Role[]
-  invites  Invite[]
-  bans     Ban[]
-  auditLog AuditLogEntry[]
+  members          Membership[]
+  channels         Channel[]
+  roles            Role[]
+  invites          Invite[]
+  bans             Ban[]
+  auditLog         AuditLogEntry[]
+  soundboardSounds SoundboardSound[]
 }
 
 model Membership {
@@ -327,6 +329,31 @@ model Ban {
   createdAt  DateTime @default(now())
 
   @@id([serverId, userId])
+  @@index([serverId])
+}
+
+// Soundboard: Server-weite Sound-Bibliothek für Sprachkanäle. Die Audiodatei
+// liegt als Blob in MinIO (objectKey "soundboard/{serverId}/{uuid}") – bewusst
+// unverschlüsselt: Sounds sind geteilte Server-Assets (wie Name/Rollen), keine
+// E2EE-Nachrichteninhalte (Trade-off in ROADMAP.md). Die Anzahl der Sounds pro
+// Server ist unbegrenzt; nur die Dateigröße pro Sound ist gedeckelt.
+model SoundboardSound {
+  id         String   @id @default(uuid())
+  serverId   String
+  server     Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  // SetNull: Der Sound überlebt das Löschen des Uploader-Kontos.
+  uploaderId String?
+  uploader   User?    @relation("UploadedSounds", fields: [uploaderId], references: [id], onDelete: SetNull)
+  name       String
+  emoji      String?
+  // Wiedergabelautstärke 0.05–1 (nur Anzeige-Metadatum; Clients klemmen selbst).
+  volume     Float    @default(1)
+  // MIME-Typ (audio/*), vom Uploader gemeldet – für die Wiedergabe im Client.
+  mimeType   String
+  objectKey  String   @unique
+  sizeBytes  Int
+  createdAt  DateTime @default(now())
+
   @@index([serverId])
 }
 

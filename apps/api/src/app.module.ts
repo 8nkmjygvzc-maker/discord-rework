@@ -18,6 +18,7 @@ import { VoiceModule } from './voice/voice.module';
 import { InvitesModule } from './invites/invites.module';
 import { PushModule } from './push/push.module';
 import { ModerationModule } from './moderation/moderation.module';
+import { SoundboardModule } from './soundboard/soundboard.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ModerationModule } from './moderation/moderation.module';
     InvitesModule,
     PushModule,
     ModerationModule,
+    SoundboardModule,
   ],
 })
 export class AppModule {}

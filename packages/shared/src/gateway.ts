@@ -79,7 +79,11 @@ export type GatewayEventType =
   | 'PRESENCE_SYNC'
   // Phase 10 – Sprachchat: Beitritt/Verlassen eines Sprachkanals bzw.
   // Mute-/Deafen-Wechsel (an Server-Mitglieder mit ViewChannels).
-  | 'VOICE_STATE_UPDATE';
+  | 'VOICE_STATE_UPDATE'
+  // Soundboard: Sound abspielen (NUR an Nutzer, die gerade im Sprachkanal
+  // sitzen) bzw. Bibliothek geändert (an Mitglieder mit ViewChannels).
+  | 'SOUNDBOARD_PLAY'
+  | 'SOUNDBOARD_UPDATE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {

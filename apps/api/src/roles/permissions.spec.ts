@@ -13,6 +13,9 @@ describe('Permissions-Bitfield', () => {
     expect(hasPermission(DEFAULT_ROLE_PERMISSIONS, Permissions.SendMessages)).toBe(true);
     expect(hasPermission(DEFAULT_ROLE_PERMISSIONS, Permissions.ManageChannels)).toBe(false);
     expect(hasPermission(DEFAULT_ROLE_PERMISSIONS, Permissions.ManageRoles)).toBe(false);
+    // Soundboard: abspielen ja (wie Discords @everyone), verwalten nein.
+    expect(hasPermission(DEFAULT_ROLE_PERMISSIONS, Permissions.UseSoundboard)).toBe(true);
+    expect(hasPermission(DEFAULT_ROLE_PERMISSIONS, Permissions.ManageSoundboard)).toBe(false);
   });
 
   it('Administrator schaltet alle Rechte frei', () => {

@@ -12,10 +12,10 @@ Meilensteinen:
 
 - **Vor einem echten Deployment (auch privat):** ✓ technisch vorbereitet
   (11.07.2026, siehe [DEPLOY.md](DEPLOY.md)): Dockerfiles + `infra/docker-compose.prod.yml`
-  + GitHub-Actions-Workflow decken Secrets aus `.env`, `TRUST_PROXY`, VAPID pro
-  Umgebung, SPA-Fallback (nginx `try_files`) und `MEDIASOUP_ANNOUNCED_IP` ab;
-  TLS terminiert der Reverse Proxy auf dem VPS. Offen sind nur die einmaligen
-  Schritte auf dem Server (DEPLOY.md Schritte 1–5)
+  - GitHub-Actions-Workflow decken Secrets aus `.env`, `TRUST_PROXY`, VAPID pro
+    Umgebung, SPA-Fallback (nginx `try_files`) und `MEDIASOUP_ANNOUNCED_IP` ab;
+    TLS terminiert der Reverse Proxy auf dem VPS. Offen sind nur die einmaligen
+    Schritte auf dem Server (DEPLOY.md Schritte 1–5)
 - **Vor echtem Mehrbenutzer-Betrieb:** E-Mail-Verifizierung + Passwort-Reset,
   2FA, Rollen-Verwaltungs-Hierarchie, Upload-Quota, Lasttests
 - **Vor einem öffentlichen Launch:** endgültiges Branding (statt „Parley“),
@@ -39,6 +39,7 @@ Meilensteinen:
 - **Schlüsselmaterial liegt unverschlüsselt in IndexedDB** (wie z. B. bei Signal Desktop auf der Platte). Passphrase-Schutz/Key-Backup wäre ein eigenes Feature – zusammen mit Multi-Device betrachten
 - **Zitat-Vorschauen sind absenderkontrolliert (Phase 9):** Die in `replyTo` eingebettete Vorschau (Text + zugeschriebener Absender) wird beim Empfänger angezeigt, ohne sie gegen die Originalnachricht zu prüfen – ein manipulierter Client kann also ein „Zitat“ fälschen, das so nie geschrieben wurde (gleiche Eigenschaft wie bei Signal-Zitaten). Milderung später: Vorschau gegen die lokal geladene Originalnachricht abgleichen und bei Abweichung markieren
 - **DM-E2EE nutzt den Sender-Key-Ratchet, nicht das reine Double Ratchet (Phase 7):** CLAUDE.md §6 sah für 1:1-Chats ein Double-Ratchet-Protokoll pro Nachricht vor. Umgesetzt sind DMs stattdessen wie Kanäle (Sender-Key-Kette pro Teilnehmer, verteilt über die X3DH+Double-Ratchet-Sessions). Grund: Der Client speichert Klartexte bewusst NIE lokal – History muss nach jedem Reload aus dem Server-Ciphertext neu entschlüsselbar sein, was mit einem reinen Double Ratchet (Zustand wandert unumkehrbar vorwärts) nicht geht. Die Kette liefert weiterhin einen neuen symmetrischen Schlüssel pro Nachricht (Forward Secrecy über den gespeicherten frühesten Stand hinaus allerdings nicht) und kein per-Nachricht-DH (schwächere Post-Compromise-Security als echtes Double Ratchet). Echtes Double Ratchet für DMs wird sinnvoll, sobald ein lokaler Nachrichtenspeicher existiert (zusammen mit Multi-Device betrachten)
+- **Soundboard-Sounds sind unverschlüsselt (12.07.2026, bewusste Entscheidung):** Die Audiodateien der Server-Soundboards liegen als Klartext-Blobs in MinIO und `SOUNDBOARD_PLAY` nennt dem Server Sound + Auslöser. Sounds sind geteilte Server-Assets (wie Servername/Rollen/Kanal-Namen), keine Nachrichteninhalte – E2EE wäre hier ohne Nutzen gegen das Bedrohungsmodell (jedes Mitglied kennt die Sounds ohnehin). Wer das anders bewerten will: Datei-Verschlüsselung wie bei Anhängen (Phase 8) wäre nachrüstbar, der Schlüssel müsste dann über die Sender-Key-Kanäle an alle Mitglieder verteilt werden
 - Dev-Standardpasswörter in `docker-compose.yml`-Defaults (`parley_dev_password`) – nur für lokale Entwicklung; vor jedem echten Deployment durch Secrets ersetzen
 
 ## Technische Schulden / Vereinfachungen
@@ -74,6 +75,10 @@ Meilensteinen:
 - **Auszeit läuft passiv ab (Phase 13, UI-Teil ✓ mit Phase 15):** `Membership.timeoutUntil` wird nicht proaktiv geleert; die Durchsetzung vergleicht bei jedem Senden/Voice-Beitritt gegen `now`. Ein abgelaufener Zeitstempel bleibt in der DB (harmlos). Das ⏳ im Mitglieder-Panel verschwindet seit Phase 15 per client-seitigem Timer beim Ablauf (ohne Reload); ein serverseitiges `SERVER_MEMBER_UPDATE` zum Ablaufzeitpunkt gibt es weiterhin nicht (andere Clients ohne offenes Panel brauchen es nicht – der Timer läuft überall lokal)
 - **Audit-Log ohne Pagination/Live-Feed (Phase 13):** `GET /api/servers/:id/audit-log` liefert die neuesten 100 Einträge, neueste zuerst; keine Cursor-Pagination und kein Live-Event (der Dialog lädt beim Öffnen). Für große Server nachziehen. Protokolliert werden Kick/Bann/Entbann/Timeout/Timeout-Ende/Mod-Nachrichtenlöschung/Voice-Trennen – Rollen-/Kanal-/Server-Änderungen (Phase 3/5) sind bewusst NICHT im Audit-Log (später ergänzbar)
 - ~~**Keine „Du wurdest gebannt/gekickt“-Rückmeldung (Phase 13)**~~ ✓ mit Phase 15 erledigt: Kick/Bann publiziert zusätzlich `SERVER_SELF_REMOVED` (Servername, Anlass, Grund) NUR an den Betroffenen – der Client zeigt einen quittierbaren Hinweis-Dialog (`NoticeHost`). Der Broadcast an die übrigen Mitglieder bleibt bewusst ohne Anlass/Grund (Moderationsdetails gehen nur den Betroffenen etwas an)
+
+- **Soundboard: Server prüft nur Dateigröße, nicht die Audio-Dauer (12.07.2026):** Eine serverseitige Dauer-Prüfung bräuchte Audio-Dekodierung (z. B. ffprobe) – bewusst weggelassen. Ehrliche Clients dekodieren die Datei VOR dem Upload (max. 10 s); gegen manipulierte Uploads (lange Niedrig-Bitraten-Dateien ≤ 1 MiB) deckelt JEDER empfangende Client die Wiedergabe hart auf 12 s (`MAX_SOUNDBOARD_PLAY_SECONDS`). Außerdem gilt wie bei Anhängen: kein Speicher-Kontingent pro Server (Anzahl der Sounds ist gewollt unbegrenzt, nur 1 MiB pro Datei) – vor echtem Mehrbenutzer-Betrieb zusammen mit dem Anhangs-Quota betrachten
+- **Soundboard-Verwaltung fremder Server (12.07.2026):** `myPermissions` kennt der Client nur für den AUSGEWÄHLTEN Server – ist man mit dem Sprachkanal eines anderen Servers verbunden, blendet die UI die Verwaltungs-Buttons (Hochladen/Bearbeiten/Löschen) aus, obwohl man das Recht vielleicht hätte (Abspielen geht immer; der Server setzt alles ohnehin serverseitig durch). Fix-Idee: Rechte des Voice-Servers beim Beitritt mitliefern oder nachladen
+- **Soundboard-Wiedergabe ist client-seitig (12.07.2026, bewusste Entscheidung, wie Discord):** `SOUNDBOARD_PLAY` geht an alle im Sprachkanal und jeder Client spielt den (gecachten) Blob lokal ab – der Sound wird NICHT in den SFU-Audio-Stream gemischt. Dadurch bleibt der SFU frei von Audio-Dekodierung; Konsequenz: Aufnahmen des reinen Voice-Streams enthalten keine Soundboard-Sounds
 
 ## Auth – bewusst auf später verschoben (Stand Phase 1)
 

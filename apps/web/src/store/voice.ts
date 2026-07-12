@@ -26,6 +26,9 @@ type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
 interface VoiceStoreState {
   /** Kanal, mit dem wir aktuell verbunden (oder am Verbinden) sind. */
   activeChannelId: string | null;
+  /** Server des verbundenen Sprachkanals (fürs Soundboard – man kann während
+   *  der Verbindung einen ANDEREN Server ausgewählt haben). */
+  activeServerId: string | null;
   status: VoiceStatus;
   selfMuted: boolean;
   selfDeafened: boolean;
@@ -73,6 +76,7 @@ let client: VoiceClient | null = null;
 
 export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   activeChannelId: null,
+  activeServerId: null,
   status: 'idle',
   selfMuted: false,
   selfDeafened: false,
@@ -108,6 +112,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     }
     set({
       activeChannelId: channel.id,
+      activeServerId: channel.serverId,
       status: 'connecting',
       error: null,
       selfMuted: false,
@@ -164,6 +169,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       set({
         status: 'error',
         activeChannelId: null,
+        activeServerId: null,
         videoTiles: [],
         speaking: {},
         error: err instanceof Error ? err.message : 'Verbindung fehlgeschlagen',
@@ -179,6 +185,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     client = null;
     set({
       activeChannelId: null,
+      activeServerId: null,
       status: 'idle',
       selfMuted: false,
       selfDeafened: false,
@@ -266,6 +273,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     }
     set({
       activeChannelId: null,
+      activeServerId: null,
       status: 'idle',
       selfMuted: false,
       selfDeafened: false,
@@ -311,6 +319,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     client = null;
     set({
       activeChannelId: null,
+      activeServerId: null,
       status: 'idle',
       selfMuted: false,
       selfDeafened: false,

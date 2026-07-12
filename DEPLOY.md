@@ -46,11 +46,11 @@ systemctl is-active nginx apache2 caddy 2>/dev/null
 
 Damit ergibt sich eine von drei Situationen – merken für Schritt 5:
 
-| Befund | Bedeutung |
-|---|---|
-| `nginx`/`apache2`/`caddy` aktiv auf dem Host | **Variante A**: bestehenden Webserver als Reverse Proxy mitbenutzen |
-| Ports 80/443 gehören einem Container (z. B. Traefik, Caddy, nginx-proxy) | **Variante B**: Parley an diesen Proxy-Container anbinden |
-| Ports 80/443 sind frei | **Variante C**: Caddy installieren (einfachste Lösung, automatisches TLS) |
+| Befund                                                                   | Bedeutung                                                                 |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `nginx`/`apache2`/`caddy` aktiv auf dem Host                             | **Variante A**: bestehenden Webserver als Reverse Proxy mitbenutzen       |
+| Ports 80/443 gehören einem Container (z. B. Traefik, Caddy, nginx-proxy) | **Variante B**: Parley an diesen Proxy-Container anbinden                 |
+| Ports 80/443 sind frei                                                   | **Variante C**: Caddy installieren (einfachste Lösung, automatisches TLS) |
 
 Außerdem prüfen, dass Docker + Compose-Plugin vorhanden sind (`docker compose version`)
 und der Deploy-Benutzer in der `docker`-Gruppe ist (`groups`).
@@ -107,12 +107,12 @@ ssh-keygen -t ed25519 -f parley_deploy -C "parley-deploy" -N ""
 - Inhalt von `parley_deploy.pub` auf dem VPS an `~/.ssh/authorized_keys` anhängen.
 - Im GitHub-Repo unter **Settings → Secrets and variables → Actions** anlegen:
 
-| Secret | Wert |
-|---|---|
-| `VPS_HOST` | IP oder Hostname des VPS |
-| `VPS_USER` | SSH-Benutzer (Mitglied der `docker`-Gruppe) |
+| Secret        | Wert                                                     |
+| ------------- | -------------------------------------------------------- |
+| `VPS_HOST`    | IP oder Hostname des VPS                                 |
+| `VPS_USER`    | SSH-Benutzer (Mitglied der `docker`-Gruppe)              |
 | `VPS_SSH_KEY` | kompletter Inhalt der **privaten** Datei `parley_deploy` |
-| `VPS_PORT` | nur falls SSH nicht auf Port 22 läuft |
+| `VPS_PORT`    | nur falls SSH nicht auf Port 22 läuft                    |
 
 Für den GHCR-Zugriff ist kein weiteres Secret nötig – der Workflow verwendet
 das automatische `GITHUB_TOKEN` (auch für den Pull auf dem VPS während des Laufs).
@@ -134,6 +134,7 @@ Warten, bis der Record auflöst (`nslookup dcparley.de`).
 > **Reihenfolge für Arians VPS (Nexora-Caddy, Variante B):** Der Live-Patch
 > unten braucht den bereits laufenden Container `parley-web` als Ziel. Anders
 > als die Kapitel-Nummerierung suggeriert, also so vorgehen:
+>
 > 1. Dieses Kapitel für Variante A/C **überspringen**.
 > 2. Erst Schritt 6 („Erster Deploy") Punkte 1–3 durchführen (pushen, Actions
 >    grün, `docker compose ps`/`curl 127.0.0.1:8080/api/health` auf dem VPS) –

@@ -27,12 +27,21 @@ export const Permissions = {
   ModerateMembers: 1n << 10n,
   /** Das Audit-Log moderativer Aktionen einsehen (Phase 13). */
   ViewAuditLog: 1n << 11n,
+  /** Soundboard-Sounds in Sprachkanälen abspielen. */
+  UseSoundboard: 1n << 12n,
+  /** Soundboard-Sounds hochladen, umbenennen, löschen. */
+  ManageSoundboard: 1n << 13n,
 } as const;
 
 export type PermissionName = keyof typeof Permissions;
 
-/** Standardrechte der automatisch angelegten Server-Rolle („Mitglied“). */
-export const DEFAULT_ROLE_PERMISSIONS: bigint = Permissions.ViewChannels | Permissions.SendMessages;
+/**
+ * Standardrechte der automatisch angelegten Server-Rolle („Mitglied“).
+ * UseSoundboard gehört dazu (wie bei Discords @everyone) – Bestands-Server
+ * wurden per Backfill-Migration (`soundboard`) nachversorgt.
+ */
+export const DEFAULT_ROLE_PERMISSIONS: bigint =
+  Permissions.ViewChannels | Permissions.SendMessages | Permissions.UseSoundboard;
 
 /** Für UI-Aufzählungen: Name, Bit und Beschreibung jedes Rechts. */
 export const PERMISSION_LIST: { name: PermissionName; label: string }[] = [
@@ -47,6 +56,8 @@ export const PERMISSION_LIST: { name: PermissionName; label: string }[] = [
   { name: 'ManageMessages', label: 'Nachrichten verwalten' },
   { name: 'ViewAuditLog', label: 'Audit-Log einsehen' },
   { name: 'CreateInvite', label: 'Einladungen erstellen' },
+  { name: 'UseSoundboard', label: 'Soundboard verwenden' },
+  { name: 'ManageSoundboard', label: 'Soundboard verwalten' },
   { name: 'Administrator', label: 'Administrator (alle Rechte)' },
 ];
 

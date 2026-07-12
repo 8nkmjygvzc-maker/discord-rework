@@ -9,11 +9,14 @@ import type {
   ReadyPayload,
   ServerMemberRemovePayload,
   ServerSelfRemovedPayload,
+  SoundboardPlayPayload,
+  SoundboardUpdatePayload,
   VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { GatewayClient } from './gateway';
 import { e2ee } from './e2ee';
 import { resetAttachmentCache } from './attachments';
+import { resetSoundboardCache } from './soundboard';
 import { rememberChannelLabel, resetChannelLabels } from './notifications';
 import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
@@ -22,6 +25,7 @@ import { useMessagesStore } from '../store/messages';
 import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
 import { useVoiceStore } from '../store/voice';
+import { useSoundboardStore } from '../store/soundboard';
 import { useNoticesStore } from '../store/notices';
 
 /**
@@ -61,6 +65,14 @@ const client = new GatewayClient({
         return;
       case 'VOICE_STATE_UPDATE':
         useVoiceStore.getState().handleVoiceStateUpdate(d as VoiceStateUpdatePayload);
+        return;
+      case 'SOUNDBOARD_PLAY':
+        useSoundboardStore.getState().handleSoundboardPlay(d as SoundboardPlayPayload);
+        return;
+      case 'SOUNDBOARD_UPDATE':
+        useSoundboardStore
+          .getState()
+          .handleSoundboardUpdate((d as SoundboardUpdatePayload).serverId);
         return;
       case 'MESSAGE_CREATE': {
         const { message, context } = d as MessageCreatePayload;
@@ -154,6 +166,7 @@ export const gateway = {
     client.stop();
     e2ee.reset();
     resetAttachmentCache();
+    resetSoundboardCache();
     resetChannelLabels();
     usePresenceStore.getState().handleDisconnected();
     useServersStore.getState().reset();
@@ -161,6 +174,7 @@ export const gateway = {
     useFriendsStore.getState().reset();
     useDmsStore.getState().reset();
     useVoiceStore.getState().reset();
+    useSoundboardStore.getState().reset();
     useNoticesStore.getState().reset();
   },
 };
