@@ -4,6 +4,7 @@ import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
 import { disablePush, enablePush, pushStatus, type PushStatus } from '../lib/push';
 import { uploadAvatar } from '../lib/profileImage';
+import AudioSettings from '../components/AudioSettings';
 import Avatar from '../components/Avatar';
 
 interface ProfilePageProps {
@@ -201,6 +202,9 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
             </button>
           </div>
         </div>
+
+        {/* Sprache & Audio (Feinschliff): Mikrofon-Empfindlichkeit + Soundboard-Lautstärke */}
+        <AudioSettings />
 
         <dl className="mt-6 space-y-2 rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm">
           <div className="flex justify-between">

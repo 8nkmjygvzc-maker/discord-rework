@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { DecodedMessageContent, MessageInfo } from '@parley/shared';
 import type { ReactionEventState } from '../store/messages';
 import { splitMentions } from '../lib/mentions';
+import { splitLinks } from '../lib/links';
 import AttachmentView from './AttachmentView';
 import Avatar from './Avatar';
 
@@ -372,7 +373,7 @@ function MentionText({
             {segment.text}
           </span>
         ) : (
-          <span key={i}>{segment.text}</span>
+          <LinkifiedText key={i} text={segment.text} />
         ),
       )}
       {edited && (
@@ -381,5 +382,29 @@ function MentionText({
         </span>
       )}
     </p>
+  );
+}
+
+/** Nicht-Erwähnungs-Text mit klickbaren http(s)-Links (Feinschliff). */
+function LinkifiedText({ text }: { text: string }) {
+  const segments = useMemo(() => splitLinks(text), [text]);
+  return (
+    <>
+      {segments.map((segment, i) =>
+        segment.href ? (
+          <a
+            key={i}
+            href={segment.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="break-all text-indigo-400 underline decoration-indigo-400/40 underline-offset-2 hover:text-indigo-300"
+          >
+            {segment.text}
+          </a>
+        ) : (
+          <span key={i}>{segment.text}</span>
+        ),
+      )}
+    </>
   );
 }

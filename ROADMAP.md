@@ -96,6 +96,9 @@ Meilensteinen:
 
 ## Ideen aus der Entwicklung
 
+- **Link-Vorschauen (12.07.2026):** Links im Chat sind seit der Verbesserungs-Runde klickbar (`lib/links.ts`, nur explizite `http(s)://`-URLs). Vorschau-Karten (Titel/Bild wie bei Discord) wären der nächste Schritt – wegen E2EE nur CLIENTSEITIG möglich (der Server sieht die URL nicht), und ein automatischer Abruf würde die IP des Lesers an den verlinkten Host leaken (Discord proxyt das serverseitig). Sinnvoll wäre Opt-in oder Klick-zum-Laden
+- **Mikrofon-Empfindlichkeit: feste Schwelle statt Automatik (12.07.2026):** Das Noise-Gate (`createMicGate` in `lib/voice.ts`) nutzt eine manuelle dBFS-Schwelle aus den Einstellungen. Discord bietet zusätzlich eine automatische Empfindlichkeit (VAD) – nachrüstbar, z. B. adaptiv aus dem Grundrauschen. Außerdem misst das Gate NACH `noiseSuppression`/`autoGainControl` des Browsers; die Browser-AGC kann leise Sprache anheben, die Schwelle wirkt also relativ dazu
+
 - **Ownership-Übergabe:** Der Owner kann seinen Server aktuell nur löschen, nicht übergeben; „Server verlassen“ ist für Owner gesperrt. Übergabe-Flow sinnvoll ab Phase 13 (Moderation)
 - **Rollen-Hierarchie – teils erledigt (Phase 5 → 13):** Die **Moderation** (Phase 13) setzt jetzt eine Hierarchie durch: Kick/Bann/Timeout/Voice-Trennen gehen nur gegen Mitglieder mit STRIKT niedrigerem Rang (höchste Rollen-Position; Owner = ∞), nie gegen den Owner oder sich selbst (`PermissionsService.getMemberRank`). **Noch offen:** Die **Rollen-Verwaltung** kennt weiter keine Hierarchie – jeder mit ManageRoles kann jede Rolle bearbeiten/zuweisen, auch sich selbst höhere Rechte geben (inkl. Administrator). Discord beschränkt das auf „nur Rollen unterhalb der eigenen“. Vor echtem Mehrbenutzer-Betrieb nachziehen (`position` existiert)
 - **Kanal-spezifische Berechtigungen (Overwrites)** und private Kanäle (`isPrivate` ist bislang nur ein Flag ohne Wirkung) – späteres Feature

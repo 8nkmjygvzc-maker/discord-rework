@@ -9,6 +9,7 @@ import {
 import Modal from './Modal';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
+import { useSettingsStore } from '../store/settings';
 import { useSoundboardStore } from '../store/soundboard';
 import { useVoiceStore } from '../store/voice';
 import { formatBytes } from '../lib/attachments';
@@ -50,6 +51,7 @@ export default function SoundboardDialog({ onClose }: { onClose: () => void }) {
           🔊 {nowPlaying.username} spielt „{nowPlaying.label}“
         </p>
       )}
+      <LocalVolumeSlider />
       {error && <p className="mb-3 text-xs text-red-400">{error}</p>}
 
       {loading && sounds.length === 0 ? (
@@ -109,6 +111,33 @@ export default function SoundboardDialog({ onClose }: { onClose: () => void }) {
         <UploadForm serverId={activeServerId} error={formError} setError={setFormError} />
       )}
     </Modal>
+  );
+}
+
+/**
+ * Lokale Wiedergabelautstärke (Einstellungs-Store, Feinschliff): wirkt sofort –
+ * auch auf gerade spielende Sounds – und nur für einen selbst.
+ */
+function LocalVolumeSlider() {
+  const volume = useSettingsStore((s) => s.soundboardVolume);
+  const setVolume = useSettingsStore((s) => s.setSoundboardVolume);
+  return (
+    <label
+      className="mb-3 flex items-center gap-2 text-xs text-zinc-400"
+      title="Nur für dich – wirkt sofort, auch auf gerade spielende Sounds"
+    >
+      🔊 Lautstärke
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={Math.round(volume * 100)}
+        onChange={(e) => setVolume(Number(e.target.value) / 100)}
+        className="flex-1"
+        data-testid="soundboard-local-volume"
+      />
+      <span className="w-9 text-right tabular-nums">{Math.round(volume * 100)}%</span>
+    </label>
   );
 }
 

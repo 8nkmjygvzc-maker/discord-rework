@@ -11,8 +11,24 @@ import {
   SoundboardSoundInfo,
 } from '@parley/shared';
 import { useAuthStore } from '../store/auth';
+import { useSettingsStore } from '../store/settings';
 
 const soundUrlCache = new Map<string, Promise<string>>();
+
+/** Gerade spielende Sounds – für die Live-Anpassung der lokalen Lautstärke. */
+const playingAudios = new Set<{ el: HTMLAudioElement; baseVolume: number }>();
+
+/** Effektive Lautstärke = Sound-Lautstärke × lokaler Regler (Einstellungen). */
+function applyVolume(entry: { el: HTMLAudioElement; baseVolume: number }): void {
+  const local = useSettingsStore.getState().soundboardVolume;
+  entry.el.volume = Math.min(1, Math.max(0, entry.baseVolume * local));
+}
+
+// Änderungen am Lautstärke-Regler wirken sofort auf alles, was gerade spielt.
+useSettingsStore.subscribe((state, prev) => {
+  if (state.soundboardVolume === prev.soundboardVolume) return;
+  for (const entry of playingAudios) applyVolume(entry);
+});
 
 function getSoundObjectUrl(sound: Pick<SoundboardSoundInfo, 'id' | 'mimeType'>): Promise<string> {
   let pending = soundUrlCache.get(sound.id);
@@ -32,14 +48,27 @@ function getSoundObjectUrl(sound: Pick<SoundboardSoundInfo, 'id' | 'mimeType'>):
 export async function playSoundboardSound(sound: SoundboardSoundInfo): Promise<void> {
   const url = await getSoundObjectUrl(sound);
   const audio = new Audio(url);
-  audio.volume = Math.min(1, Math.max(0, sound.volume));
-  const stopper = setTimeout(() => audio.pause(), MAX_SOUNDBOARD_PLAY_SECONDS * 1000);
-  audio.addEventListener('ended', () => clearTimeout(stopper), { once: true });
+  const entry = { el: audio, baseVolume: Math.min(1, Math.max(0, sound.volume)) };
+  applyVolume(entry);
+  playingAudios.add(entry);
+  const stopper = setTimeout(() => {
+    audio.pause();
+    playingAudios.delete(entry);
+  }, MAX_SOUNDBOARD_PLAY_SECONDS * 1000);
+  audio.addEventListener(
+    'ended',
+    () => {
+      clearTimeout(stopper);
+      playingAudios.delete(entry);
+    },
+    { once: true },
+  );
   try {
     await audio.play();
   } catch {
     // Autoplay-Policy o. Ä. – Sounds sind nice-to-have und blockieren nichts.
     clearTimeout(stopper);
+    playingAudios.delete(entry);
   }
 }
 

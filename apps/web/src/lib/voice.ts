@@ -1,5 +1,6 @@
 import { Device, types } from 'mediasoup-client';
 import type { VoiceProducerInfo, VoiceServerMessage, VoiceSource } from '@parley/shared';
+import { MIC_GATE_OFF_DB, useSettingsStore } from '../store/settings';
 
 /**
  * Browser-seitige Voice-Anbindung (Phase 10/11). Kapselt die mediasoup-client-
@@ -109,6 +110,17 @@ export class SpeakingDetector {
   }
 }
 
+/**
+ * Noise-Gate fürs eigene Mikrofon (Feinschliff): Das Mikrofonsignal läuft
+ * durch einen GainNode, der unterhalb der eingestellten Empfindlichkeits-
+ * Schwelle (Settings-Store, dBFS) auf 0 geht – übertragen wird dann Stille.
+ * Die Schwelle wird bei jedem Poll frisch gelesen und wirkt damit live,
+ * auch während einer laufenden Verbindung.
+ */
+const MIC_GATE_POLL_MS = 50;
+/** Gate bleibt nach dem letzten lauten Sample kurz offen (Wortenden nicht abschneiden). */
+const MIC_GATE_HOLD_MS = 400;
+
 let ridSeq = 1;
 
 export class VoiceClient {
@@ -117,7 +129,12 @@ export class VoiceClient {
   private sendTransport: types.Transport | null = null;
   private recvTransport: types.Transport | null = null;
   private micProducer: types.Producer | null = null;
+  /** Track, der produziert wird (mit Gate: der bearbeitete, sonst der rohe). */
   private micTrack: MediaStreamTrack | null = null;
+  /** Roher getUserMedia-Track – muss beim Trennen separat gestoppt werden. */
+  private micRawTrack: MediaStreamTrack | null = null;
+  /** Aufräum-Referenzen des Noise-Gates (null = Gate nicht aktiv). */
+  private micGate: { source: MediaStreamAudioSourceNode; timer: number } | null = null;
   private camProducer: types.Producer | null = null;
   private camTrack: MediaStreamTrack | null = null;
   private screenProducer: types.Producer | null = null;
@@ -252,11 +269,17 @@ export class VoiceClient {
     for (const d of this.speakingDetectors.values()) d.stop();
     this.speakingDetectors.clear();
     this.removeResumeHandler();
+    if (this.micGate) {
+      window.clearInterval(this.micGate.timer);
+      this.micGate.source.disconnect();
+      this.micGate = null;
+    }
     if (this.audioCtx) {
       void this.audioCtx.close().catch(() => undefined);
       this.audioCtx = null;
     }
     this.micTrack?.stop();
+    this.micRawTrack?.stop();
     this.camTrack?.stop();
     this.screenTrack?.stop();
     this.sendTransport?.close();
@@ -310,18 +333,83 @@ export class VoiceClient {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      this.micTrack = stream.getAudioTracks()[0] ?? null;
-      if (this.micTrack && this.sendTransport) {
+      this.micRawTrack = stream.getAudioTracks()[0] ?? null;
+      if (this.micRawTrack && this.sendTransport) {
+        // Durchs Noise-Gate schleifen (Empfindlichkeit aus den Einstellungen);
+        // ohne WebAudio wird das rohe Signal gesendet (bisheriges Verhalten).
+        this.micTrack = (await this.createMicGate(this.micRawTrack)) ?? this.micRawTrack;
         this.micProducer = await this.sendTransport.produce({
           track: this.micTrack,
           appData: { source: 'mic' satisfies VoiceSource },
         });
+        // Sprech-Erkennung auf dem GESENDETEN Track – der eigene Ring leuchtet
+        // damit nur, wenn die anderen einen auch wirklich hören.
         this.attachSpeaking('self', this.micTrack, this.cb.self.userId);
       }
     } catch {
       // Kein Mikrofon/keine Berechtigung → Zuhörer-Modus. Nicht fatal.
       this.micProducer = null;
       this.micTrack = null;
+      this.micRawTrack = null;
+    }
+  }
+
+  /**
+   * Baut das Noise-Gate: Quelle → GainNode → MediaStreamDestination; ein
+   * Analyser misst parallel den RMS-Pegel (dBFS) und öffnet/schließt das Gate
+   * mit kurzer Haltezeit. Liefert den bearbeiteten Track – oder null, wenn
+   * WebAudio nicht verfügbar/lauffähig ist (dann wird das rohe Signal gesendet,
+   * ein suspendierter AudioContext würde sonst dauerhaft Stille übertragen).
+   */
+  private async createMicGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null> {
+    const ctx = this.ensureAudioContext();
+    if (!ctx) return null;
+    try {
+      if (ctx.state !== 'running') await ctx.resume();
+      if ((ctx.state as AudioContextState) !== 'running') return null;
+      const source = ctx.createMediaStreamSource(new MediaStream([raw]));
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      const gain = ctx.createGain();
+      const dest = ctx.createMediaStreamDestination();
+      source.connect(analyser);
+      source.connect(gain);
+      gain.connect(dest);
+      const track = dest.stream.getAudioTracks()[0];
+      if (!track) {
+        source.disconnect();
+        return null;
+      }
+
+      const buf = new Float32Array(analyser.fftSize);
+      let lastLoudAt = 0;
+      let open = true; // startet offen – erst messen, dann ggf. schließen
+      const timer = window.setInterval(() => {
+        const thresholdDb = useSettingsStore.getState().micThresholdDb;
+        const now = performance.now();
+        let shouldOpen: boolean;
+        if (thresholdDb <= MIC_GATE_OFF_DB) {
+          shouldOpen = true; // Gate deaktiviert → immer übertragen
+        } else {
+          analyser.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+          const rms = Math.sqrt(sum / buf.length);
+          const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+          if (db >= thresholdDb) lastLoudAt = now;
+          shouldOpen = lastLoudAt !== 0 && now - lastLoudAt <= MIC_GATE_HOLD_MS;
+        }
+        if (shouldOpen !== open) {
+          open = shouldOpen;
+          // Kleine Zeitkonstanten statt hartem Schnitt – vermeidet Knackser.
+          gain.gain.setTargetAtTime(open ? 1 : 0, ctx.currentTime, open ? 0.01 : 0.05);
+        }
+      }, MIC_GATE_POLL_MS);
+
+      this.micGate = { source, timer };
+      return track;
+    } catch {
+      return null; // Ohne Gate wird das rohe Signal gesendet – nicht fatal.
     }
   }
 
