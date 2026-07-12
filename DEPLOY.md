@@ -10,15 +10,18 @@ der bestehenden Website nicht in die Quere kommt:
 - Öffentlich erreichbar wird Parley über einen Reverse Proxy mit TLS (Schritt 5)
 
 ```
-Internet ──► Reverse Proxy (TLS, Port 443)          bestehende Website
-                 │  parley.deine-domain.de              (unverändert)
-                 ▼
-         127.0.0.1:8080  Web-Container (nginx)
-                 │  statische SPA + Proxy
-                 ├── /api, /gateway ──► api-Container (NestJS)
-                 └── /voice ─────────► voice-Container (mediasoup)
-Internet ──► UDP/TCP 40000–40100 ────► voice-Container (Medienströme)
+                              ┌─ dcparley.de ────────► parley-web:80 (nginx)
+                              │                             │  statische SPA + Proxy
+Internet ──► nexora-frontend │                             ├── /api, /gateway ─► api-Container
+             (Caddy, TLS,    ─┤                             └── /voice ────────► voice-Container
+              Port 80/443)    │
+                              └─ nexora-studio.de ───► bestehende Website (unverändert)
+Internet ──► UDP/TCP 40000–40100 ──────────────────────────► voice-Container (Medienströme)
 ```
+
+Auf Arians VPS terminiert **derselbe** Caddy-Container (`nexora-frontend`), der
+bereits `nexora-studio.de` bedient, per zusätzlichem Site-Block auch
+`dcparley.de` (Details: Abschnitt 5, „Variante B – konkret: Nexora-Caddy").
 
 **Ablauf pro Deploy:** Push auf `main` → GitHub Actions baut die drei Images
 (api/voice/web), pusht sie nach GHCR und aktualisiert den Stack per SSH
@@ -51,6 +54,15 @@ Damit ergibt sich eine von drei Situationen – merken für Schritt 5:
 
 Außerdem prüfen, dass Docker + Compose-Plugin vorhanden sind (`docker compose version`)
 und der Deploy-Benutzer in der `docker`-Gruppe ist (`groups`).
+
+> **Befund auf Arians VPS (11.07.2026):** Variante B. `nexora-frontend`
+> (Image `ghcr.io/rijonmjekiqi14/nexora-studio---frontend`) belegt 80/443
+> selbst – ein Caddy-Container, der `nexora-studio.de` direkt terminiert
+> (TLS, Frontend-Ausfall + `/api/*`-Proxy zum Backend). Sein Caddyfile ist
+> ins Image gebacken (`docker inspect` zeigt keinen Bind-Mount, nur die
+> Volumes `caddy_data`/`caddy_config`), also nicht von außen editierbar.
+> Docker-Netzwerk: `nexora-net`. Konkrete Schritte dafür: Abschnitt
+> „Variante B – Nexora-Caddy" unten.
 
 ## 2. Einmalige Einrichtung auf dem VPS
 
@@ -107,16 +119,28 @@ das automatische `GITHUB_TOKEN` (auch für den Pull auf dem VPS während des Lau
 
 ## 4. DNS
 
-Beim Domain-Anbieter einen A-Record anlegen (Subdomain empfohlen, damit die
-bestehende Website unberührt bleibt):
+`dcparley.de` ist eine eigenständige Domain (keine Subdomain von
+`nexora-studio.de`) – beim Domain-Anbieter einen A-Record auf die VPS-IP anlegen:
 
 ```
-A    parley.deine-domain.de    →  <öffentliche IPv4 des VPS>
+A    dcparley.de    →  <öffentliche IPv4 des VPS>
+A    www.dcparley.de →  <öffentliche IPv4 des VPS>   (optional, falls www gewünscht)
 ```
 
-Warten, bis der Record auflöst (`nslookup parley.deine-domain.de`).
+Warten, bis der Record auflöst (`nslookup dcparley.de`).
 
 ## 5. Reverse Proxy (TLS)
+
+> **Reihenfolge für Arians VPS (Nexora-Caddy, Variante B):** Der Live-Patch
+> unten braucht den bereits laufenden Container `parley-web` als Ziel. Anders
+> als die Kapitel-Nummerierung suggeriert, also so vorgehen:
+> 1. Dieses Kapitel für Variante A/C **überspringen**.
+> 2. Erst Schritt 6 („Erster Deploy") Punkte 1–3 durchführen (pushen, Actions
+>    grün, `docker compose ps`/`curl 127.0.0.1:8080/api/health` auf dem VPS) –
+>    **Schritt 6 Punkt 4 (Browser-Test über die Domain) überspringen**, die
+>    Domain routet noch nirgendwohin.
+> 3. Dann hier weiter zu „Variante B – konkret: Nexora-Caddy".
+> 4. Danach zurück zu Schritt 6 Punkt 4 und `https://dcparley.de` testen.
 
 ### Variante A: bestehender nginx auf dem Host
 
@@ -125,7 +149,7 @@ Neue Datei `/etc/nginx/sites-available/parley`:
 ```nginx
 server {
     listen 80;
-    server_name parley.deine-domain.de;
+    server_name dcparley.de;
 
     # Upload-Limit der App (verschlüsselte Anhänge bis ~10 MiB)
     client_max_body_size 12m;
@@ -150,7 +174,7 @@ Aktivieren und TLS per certbot holen:
 ```bash
 sudo ln -s /etc/nginx/sites-available/parley /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d parley.deine-domain.de
+sudo certbot --nginx -d dcparley.de
 ```
 
 (Bei Apache analog: `ProxyPass / http://127.0.0.1:8080/` plus
@@ -164,6 +188,71 @@ beim `web`-Service das externe Netz + Labels ergänzen — Details hängen vom
 vorhandenen Setup ab; die Ausgabe von `docker ps` und der bestehenden
 compose-Datei des Proxys zeigt, was nötig ist. `WEB_BIND` kann dann entfallen.
 
+### Variante B – konkret: Nexora-Caddy auf Arians VPS
+
+`infra/docker-compose.prod.yml` hängt den `web`-Service bereits zusätzlich in
+ein externes Docker-Netz (`EXTERNAL_PROXY_NETWORK` in `.env`, Default
+`nexora-net`) – das ist auf diesem VPS bereits richtig vorkonfiguriert.
+Fehlend ist nur der Caddy-seitige Site-Block, weil `nexora-frontend`s
+Caddyfile im Image steckt (kein Bind-Mount). Deshalb: **Live-Patch im
+laufenden Container** (Caddy validiert vor dem Swap – `nexora-studio.de`
+bleibt bei einem Fehler unberührt online).
+
+**Vorbedingung:** Der erste Parley-Deploy (Schritt 6) muss bereits gelaufen
+sein, damit der Container `parley-web` existiert und im Netz `nexora-net`
+hängt. Prüfen:
+
+```bash
+docker network inspect nexora-net --format '{{range .Containers}}{{.Name}} {{end}}'
+# sollte u. a. "parley-web" auflisten
+```
+
+Aktuellen Caddyfile-Inhalt sichern und lokal (auf dem VPS) um den Block für
+`dcparley.de` ergänzen (fertig zum Copy-Paste; `www.dcparley.de` nur drin
+lassen, wenn der optionale www-A-Record aus Schritt 4 gesetzt ist):
+
+```bash
+docker exec nexora-frontend cat /etc/caddy/Caddyfile > ~/nexora-caddyfile.backup
+cp ~/nexora-caddyfile.backup ~/nexora-caddyfile.new
+
+cat >> ~/nexora-caddyfile.new <<'EOF'
+
+dcparley.de, www.dcparley.de {
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Caddy behandelt WebSocket-Upgrades (/gateway, /voice) automatisch mit –
+    # anders als nginx braucht reverse_proxy hierfür keine Zusatzkonfiguration.
+    reverse_proxy parley-web:80
+}
+EOF
+
+# Neue Datei in den laufenden Container kopieren (überschreibt NICHT den
+# Nexora-Block, ergänzt ihn nur) und Caddy per Admin-API (Port 2019,
+# nur containerintern) neu laden lassen.
+docker cp ~/nexora-caddyfile.new nexora-frontend:/etc/caddy/Caddyfile
+docker exec nexora-frontend caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+Danach `https://dcparley.de` testen. Bei einem Config-Fehler bricht
+`caddy reload` mit einer Fehlermeldung ab, OHNE die laufende (gültige)
+Config zu ersetzen – `nexora-studio.de` bleibt in jedem Fall erreichbar.
+
+**Wichtige Einschränkung:** Das gebackene Caddyfile im Image gewinnt bei
+jedem Neustart/Redeploy von `nexora-frontend` (z. B. `docker restart` oder
+ein neues Nexora-Image) – der Parley-Block ist dann weg und muss mit den
+obigen Befehlen erneut eingespielt werden (Backup liegt in
+`~/nexora-caddyfile.backup`). Dauerhaft würde das nur eine Änderung an der
+Bildquelle (`ghcr.io/rijonmjekiqi14/nexora-studio---frontend`) lösen – das
+ist ein fremdes Image/Repo, dafür bräuchte es Zugriff auf dessen Build.
+
 ### Variante C: Ports 80/443 sind frei → Caddy
 
 ```bash
@@ -173,7 +262,7 @@ sudo apt install caddy
 `/etc/caddy/Caddyfile`:
 
 ```
-parley.deine-domain.de {
+dcparley.de {
     reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -200,7 +289,7 @@ docker compose -f docker-compose.prod.yml logs api    # Migrationen gelaufen?
 curl -s http://127.0.0.1:8080/api/health              # {"status":"ok",...}
 ```
 
-4. `https://parley.deine-domain.de` im Browser öffnen, registrieren, testen.
+4. `https://dcparley.de` im Browser öffnen, registrieren, testen.
    Voice-Chat mit zwei Geräten testen (dafür müssen die UDP-Ports offen sein).
 
 ## 7. Betrieb

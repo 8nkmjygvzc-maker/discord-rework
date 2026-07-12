@@ -130,14 +130,35 @@ services:
 
   web:
     image: ${IMAGE_PREFIX:-ghcr.io/8nkmjygvzc-maker/parley}-web:${IMAGE_TAG:-latest}
+    # Fester Name, damit der externe Reverse Proxy (siehe unten) ihn per
+    # Docker-DNS unter diesem Namen erreichen kann.
+    container_name: parley-web
     restart: unless-stopped
     ports:
-      # Bewusst nur an localhost binden – TLS und die öffentliche Erreichbarkeit
-      # übernimmt der Reverse Proxy auf dem Host (siehe DEPLOY.md).
+      # Nur an localhost gebunden – für manuelle Health-Checks auf dem VPS
+      # (curl 127.0.0.1:8080/api/health). Die öffentliche Erreichbarkeit läuft
+      # NICHT hierüber, sondern über das externe Netz unten (siehe DEPLOY.md).
       - '${WEB_BIND:-127.0.0.1:8080}:80'
     depends_on:
       - api
       - voice
+    networks:
+      - default
+      # Alias auf das externe Netz unten (Docker-Compose-Service-Networks
+      # referenzieren den Top-Level-Schlüssel, nicht den echten Netzwerknamen).
+      - proxy-net
+
+networks:
+  default:
+  # Externes Netz eines bereits vorhandenen Reverse-Proxy-Containers auf dem
+  # VPS (z. B. Caddy einer anderen Website). `external: true` → Compose
+  # erwartet, dass es schon existiert, und legt keins an – ein falscher Name
+  # in `name:` (per .env: EXTERNAL_PROXY_NETWORK) lässt `docker compose up`
+  # fehlschlagen. Ohne fremden Proxy auf dem VPS: den `proxy-net`-Eintrag hier
+  # UND in `services.web.networks` oben entfernen.
+  proxy-net:
+    external: true
+    name: ${EXTERNAL_PROXY_NETWORK:-nexora-net}
 
 volumes:
   pgdata:
