@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { DecodedMessageContent, MessageInfo } from '@parley/shared';
+import type { DecodedMessageContent, LinkEmbed, MessageInfo } from '@parley/shared';
 import type { ReactionEventState } from '../store/messages';
 import { MentionTargets, splitMentions } from '../lib/mentions';
 import { splitLinks } from '../lib/links';
@@ -243,6 +243,9 @@ export default function MessageRow({
                 />
               )
             )}
+            {content.embeds.map((embed, i) => (
+              <EmbedCard key={i} embed={embed} />
+            ))}
             {content.attachments.map((meta) => (
               <AttachmentView key={meta.id} meta={meta} />
             ))}
@@ -405,6 +408,43 @@ function MentionText({
         </span>
       )}
     </p>
+  );
+}
+
+/**
+ * Link-Vorschau-Karte (Embed, Feinschliff). Die Felder sind absenderkontrolliert,
+ * aber beim Dekodieren schon defensiv geprüft (`url`/`imageUrl` sind http(s),
+ * Texte geklemmt). Das Bild lädt der LESER-Browser direkt vom fremden Host –
+ * `referrerPolicy="no-referrer"` reduziert die mitgesendeten Metadaten (der
+ * IP-Leak selbst bleibt, siehe ROADMAP). Bricht der Bildabruf, wird es versteckt.
+ */
+function EmbedCard({ embed }: { embed: LinkEmbed }) {
+  const [imageOk, setImageOk] = useState(true);
+  return (
+    <a
+      href={embed.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 block max-w-md overflow-hidden rounded border-l-4 border-indigo-500 bg-zinc-800/60 p-3 no-underline transition hover:bg-zinc-800"
+    >
+      {embed.siteName && <p className="text-xs text-zinc-400">{embed.siteName}</p>}
+      {embed.title && (
+        <p className="mt-0.5 font-semibold break-words text-indigo-300">{embed.title}</p>
+      )}
+      {embed.description && (
+        <p className="mt-1 text-sm break-words text-zinc-300">{embed.description}</p>
+      )}
+      {embed.imageUrl && imageOk && (
+        <img
+          src={embed.imageUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setImageOk(false)}
+          className="mt-2 max-h-72 w-full rounded object-cover"
+        />
+      )}
+    </a>
   );
 }
 

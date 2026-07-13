@@ -14,6 +14,7 @@ import { useAuthStore } from './auth';
 import { useServersStore } from './servers';
 import { dmMemberIds, useDmsStore } from './dms';
 import { e2ee } from '../lib/e2ee';
+import { buildEmbeds } from '../lib/unfurl';
 import { collectAttachmentIds, uploadAttachment } from '../lib/attachments';
 import { mentionsMember, mentionsUser } from '../lib/mentions';
 import { notifyMention, recallChannelLabel } from '../lib/notifications';
@@ -166,8 +167,12 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     const attachments: AttachmentMeta[] = [];
     for (const file of files) attachments.push(await uploadAttachment(channelId, file));
 
+    // Link-Vorschauen (automatisch beim Senden): Der Server holt die Metadaten,
+    // sie reisen dann IM E2EE-Klartext mit. Best-effort – blockiert nicht.
+    const embeds = await buildEmbeds(content);
+
     // Verschlüsseln (verteilt bei Bedarf vorher den eigenen Sender-Key).
-    const plaintext = encodeMessageContent(content, attachments, replyTo);
+    const plaintext = encodeMessageContent(content, attachments, replyTo, embeds);
     const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
     const attachmentIds = collectAttachmentIds(attachments);
     const message = await authFetch<MessageInfo>(`/api/channels/${channelId}/messages`, {
@@ -178,7 +183,13 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     set((s) => ({
       decrypted: {
         ...s.decrypted,
-        [message.id]: { text: content, attachments, replyTo: replyTo ?? null, reaction: null },
+        [message.id]: {
+          text: content,
+          attachments,
+          replyTo: replyTo ?? null,
+          reaction: null,
+          embeds,
+        },
       },
     }));
     get().handleMessageCreate(message);
@@ -211,6 +222,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
       content,
       existing?.attachments ?? [],
       existing?.replyTo ?? undefined,
+      existing?.embeds ?? [],
     );
     const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
     const message = await authFetch<MessageInfo>(
