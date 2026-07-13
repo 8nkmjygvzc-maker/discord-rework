@@ -162,7 +162,7 @@ function DeleteButton({ serverId, soundId }: { serverId: string; soundId: string
   );
 }
 
-/** Neuen Sound hochladen: Datei + Name + optionales Emoji + Lautstärke. */
+/** Neuen Sound hochladen: Datei (Auswahl ODER Drag & Drop) + Name + Emoji + Lautstärke. */
 function UploadForm({
   serverId,
   error,
@@ -174,24 +174,27 @@ function UploadForm({
 }) {
   const upload = useSoundboardStore((s) => s.upload);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
   const [emoji, setEmoji] = useState('');
   const [volume, setVolume] = useState(100);
   const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
-  const onFileChosen = () => {
-    const file = fileRef.current?.files?.[0];
+  const pickFile = (chosen: File | undefined) => {
+    if (!chosen) return;
+    setError(null);
+    setFile(chosen);
     // Namensvorschlag aus dem Dateinamen (ohne Endung), solange keiner dasteht.
-    if (file && !name) {
-      setName(file.name.replace(/\.[^.]+$/, '').slice(0, MAX_SOUNDBOARD_NAME_LENGTH));
-    }
+    setName((current) =>
+      current ? current : chosen.name.replace(/\.[^.]+$/, '').slice(0, MAX_SOUNDBOARD_NAME_LENGTH),
+    );
   };
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    const file = fileRef.current?.files?.[0];
     if (!file) {
-      setError('Bitte eine Audiodatei auswählen');
+      setError('Bitte eine Audiodatei auswählen oder hineinziehen');
       return;
     }
     if (!name.trim()) {
@@ -206,6 +209,7 @@ function UploadForm({
       volume: volume / 100,
     })
       .then(() => {
+        setFile(null);
         setName('');
         setEmoji('');
         setVolume(100);
@@ -221,15 +225,49 @@ function UploadForm({
     <form onSubmit={onSubmit} className="mt-4 border-t border-zinc-700 pt-4">
       <h3 className="text-sm font-semibold text-zinc-200">Sound hinzufügen</h3>
       <p className="mt-1 text-xs text-zinc-500">
-        Audiodatei bis 1 MiB und 10 Sekunden – die Anzahl der Sounds ist unbegrenzt.
+        Audiodatei bis 10 MiB, beliebige Länge – die Anzahl der Sounds ist unbegrenzt.
       </p>
       <input
         ref={fileRef}
         type="file"
         accept="audio/*"
-        onChange={onFileChosen}
-        className="mt-2 block w-full text-xs text-zinc-400 file:mr-2 file:rounded file:border-0 file:bg-zinc-700 file:px-2 file:py-1 file:text-xs file:text-zinc-200 hover:file:bg-zinc-600"
+        onChange={(e) => {
+          pickFile(e.target.files?.[0]);
+          e.target.value = ''; // gleiche Datei erneut wählbar
+        }}
+        className="hidden"
       />
+      {/* Drop-Zone: Klick öffnet die Dateiauswahl, Dateien lassen sich hineinziehen. */}
+      <button
+        type="button"
+        data-testid="sound-drop-zone"
+        onClick={() => fileRef.current?.click()}
+        onDragOver={(e) => {
+          if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          pickFile(e.dataTransfer.files?.[0]);
+        }}
+        className={`mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-xs transition ${
+          dragOver
+            ? 'border-indigo-400 bg-indigo-950/50 text-indigo-200'
+            : 'border-zinc-600 text-zinc-400 hover:border-zinc-500 hover:text-zinc-300'
+        }`}
+      >
+        {file ? (
+          <>
+            🎵 <span className="max-w-56 truncate">{file.name}</span>
+            <span className="text-zinc-500">({formatBytes(file.size)})</span>
+          </>
+        ) : (
+          <>🎵 Audiodatei hierher ziehen oder klicken</>
+        )}
+      </button>
       <div className="mt-2 flex gap-2">
         <input
           type="text"

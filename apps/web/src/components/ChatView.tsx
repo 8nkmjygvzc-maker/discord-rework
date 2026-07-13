@@ -83,6 +83,10 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const stickToBottom = useRef(true);
   const jumpBusy = useRef(false);
   const lastTypingPing = useRef(0);
+  // Drag & Drop: Zähler statt Flag, weil dragenter/dragleave für jedes
+  // Kind-Element feuern – erst bei 0 verschwindet das Overlay wieder.
+  const dragDepth = useRef(0);
+  const [dragOver, setDragOver] = useState(false);
 
   const messages = chan?.messages ?? [];
 
@@ -134,6 +138,46 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     }
     return map;
   }, [dm, dmChannels, channel.id, members, user]);
+
+  /** Profilkarte des Absenders öffnen (Klick auf Avatar/Name). */
+  function showSenderProfile(senderId: string, senderUsername: string) {
+    const open = useUiStore.getState().openProfile;
+    if (user && senderId === user.id) {
+      open({
+        id: user.id,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+        bannerUrl: user.bannerUrl,
+        status: user.status,
+      });
+      return;
+    }
+    const dmOther = dm ? dmChannels.find((c) => c.id === channel.id)?.otherUser : undefined;
+    if (dmOther && dmOther.id === senderId) {
+      open({ ...dmOther });
+      return;
+    }
+    const member = members?.find((m) => m.userId === senderId);
+    if (member) {
+      open({
+        id: member.userId,
+        username: member.username,
+        nickname: member.nickname,
+        avatarUrl: member.avatarUrl,
+        bannerUrl: member.bannerUrl,
+        status: member.status,
+      });
+      return;
+    }
+    // Absender nicht (mehr) auflösbar (z. B. Server verlassen): Minimalkarte.
+    open({
+      id: senderId,
+      username: senderUsername,
+      avatarUrl: senderAvatars.get(senderId) ?? null,
+      bannerUrl: null,
+      status: '',
+    });
+  }
 
   // Reaktions-Events sind „Nachrichten“, gehören aber nicht in den Verlauf.
   const conversation = useMemo(
@@ -214,6 +258,8 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     setSearchQuery('');
     setMentionSuppressedAt(null);
     lastTypingPing.current = 0;
+    dragDepth.current = 0;
+    setDragOver(false);
   }, [channel.id]);
 
   // Sichtbare DM melden (Phase 15): löscht den Ungelesen-Zähler des Kanals
@@ -234,6 +280,39 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     const el = scrollRef.current;
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  // --- Drag & Drop (Quality-of-Life-Runde): Dateien in den Chat ziehen ------
+
+  /** Zieht der Nutzer gerade Dateien (und keinen markierten Text o. Ä.)? */
+  function draggingFiles(e: React.DragEvent) {
+    return Array.from(e.dataTransfer.types).includes('Files');
+  }
+
+  function onDragEnter(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    e.preventDefault(); // erlaubt das Ablegen
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    addFiles(e.dataTransfer.files);
   }
 
   function addFiles(selected: FileList | null) {
@@ -481,7 +560,24 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   }
 
   return (
-    <main className="animate-view-in flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <main
+      className="animate-view-in relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {/* Drop-Overlay: erscheint, sobald Dateien über dem Chat schweben. */}
+      {dragOver && (
+        <div
+          className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-indigo-400 bg-indigo-950/60"
+          data-testid="drop-overlay"
+        >
+          <p className="text-sm font-semibold text-indigo-200">
+            📎 Dateien hier ablegen – sie werden verschlüsselt angehängt
+          </p>
+        </div>
+      )}
       <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
         {/* Handy: Kanal-/DM-Sidebar als Drawer öffnen (md+: immer sichtbar). */}
         <button
@@ -631,6 +727,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
                 flash={flashId === msg.id}
                 senderColor={senderColors.get(msg.senderId) ?? null}
                 senderAvatarUrl={senderAvatars.get(msg.senderId) ?? null}
+                onShowProfile={() => showSenderProfile(msg.senderId, msg.senderUsername)}
                 onToggleReaction={(emoji, mine) => toggleReaction(msg.id, emoji, mine)}
                 onReply={() => startReply(msg.id)}
                 onOpenThread={() => setThreadRootId(msg.id)}

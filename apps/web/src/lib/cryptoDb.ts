@@ -44,6 +44,11 @@ export class CryptoDb {
     return this.request(store, 'readwrite', (s) => s.delete(key)).then(() => undefined);
   }
 
+  /** Kompletten Store leeren (z. B. Sessions nach Identitätsübernahme). */
+  clear(store: CryptoStoreName): Promise<void> {
+    return this.request(store, 'readwrite', (s) => s.clear()).then(() => undefined);
+  }
+
   close(): void {
     this.db.close();
   }

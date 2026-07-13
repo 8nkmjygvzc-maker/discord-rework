@@ -86,7 +86,12 @@ const client = new GatewayClient({
         const me = useAuthStore.getState().user;
         if (me && me.id === user.id) {
           useAuthStore.setState({
-            user: { ...me, avatarUrl: user.avatarUrl, status: user.status },
+            user: {
+              ...me,
+              avatarUrl: user.avatarUrl,
+              bannerUrl: user.bannerUrl,
+              status: user.status,
+            },
           });
         }
         return;
@@ -116,8 +121,8 @@ const client = new GatewayClient({
         return;
       }
       case 'KEY_ENVELOPE':
-        // Fehler nicht eskalieren: Der Umschlag bleibt bis zum Ack in der
-        // Mailbox und wird beim nächsten syncEnvelopes erneut zugestellt.
+        // Fehler nicht eskalieren: Der Umschlag bleibt in der Mailbox
+        // (Retention) und wird beim nächsten syncEnvelopes erneut geholt.
         e2ee
           .handleEnvelopeEvent((d as { envelope: KeyEnvelopeInfo }).envelope)
           .catch((err: unknown) => console.warn('Schlüssel-Umschlag nicht verarbeitet:', err));

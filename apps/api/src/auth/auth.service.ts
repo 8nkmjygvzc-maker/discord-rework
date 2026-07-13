@@ -145,6 +145,7 @@ export function toAuthUser(user: User): AuthUser {
     username: user.username,
     email: user.email,
     avatarUrl: user.avatarUrl,
+    bannerUrl: user.bannerUrl,
     status: user.status,
     createdAt: user.createdAt.toISOString(),
   };

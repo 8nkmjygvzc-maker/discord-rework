@@ -18,6 +18,9 @@ model User {
   email        String   @unique
   passwordHash String
   avatarUrl    String?
+  // Profil-Banner (Querformat-Bild oben auf der Profilkarte), wie avatarUrl
+  // nur über den Upload-Endpunkt setzbar.
+  bannerUrl    String?
   // Frei wählbarer Status-Text fürs Profil; Online-Presence läuft über Redis.
   status       String   @default("")
   createdAt    DateTime @default(now())
@@ -41,6 +44,21 @@ model User {
   auditActions    AuditLogEntry[]    @relation("AuditActor")
   auditTargeted   AuditLogEntry[]    @relation("AuditTarget")
   soundboardSounds SoundboardSound[] @relation("UploadedSounds")
+  keyBackup       KeyBackup?
+}
+
+// Multi-Browser-Support: verschlüsseltes Backup des privaten Schlüsselmaterials.
+// Der Blob ist mit einem AUS DEM PASSWORT abgeleiteten Schlüssel (Argon2id,
+// clientseitig) verschlüsselt – der Server kann ihn nicht öffnen. Details in
+// packages/shared/src/crypto/backup.ts.
+model KeyBackup {
+  userId     String   @id
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  salt       String
+  nonce      String
+  ciphertext String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 // Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –

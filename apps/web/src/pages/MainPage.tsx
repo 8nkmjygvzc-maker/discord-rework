@@ -14,6 +14,7 @@ import RolesDialog from '../components/RolesDialog';
 import InviteDialog from '../components/InviteDialog';
 import ModerationDialog from '../components/ModerationDialog';
 import ServerSettingsDialog from '../components/ServerSettingsDialog';
+import UserProfileCard from '../components/UserProfileCard';
 import Modal from '../components/Modal';
 import { ApiError } from '../lib/api';
 import { useAuthStore } from '../store/auth';
@@ -211,6 +212,10 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
         />
       )}
       {dialog === 'moderation' && server && <ModerationDialog onClose={() => setDialog(null)} />}
+
+      {/* Profilkarte (Klick auf Avatar/Name); „Nachricht senden“ wechselt zur
+          Home-Ansicht, wo der geöffnete DM-Kanal bereits ausgewählt ist. */}
+      <UserProfileCard onOpenDm={() => setHome(true)} />
     </div>
   );
 }

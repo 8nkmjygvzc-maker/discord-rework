@@ -17,16 +17,30 @@
  * Web Lock (ein Lock pro Nutzer). Entschlüsseln von Kanal-Nachrichten ist
  * bewusst idempotent (frühester Sender-Key-Stand bleibt gespeichert) und
  * braucht keinen Lock.
+ *
+ * Multi-Browser (gleicher Account in mehreren Browsern): Alle Browser teilen
+ * sich EINE Identität über ein passwortverschlüsseltes Schlüssel-Backup auf
+ * dem Server (syncKeyBackup). Sender-Keys werden zusätzlich an sich selbst
+ * verteilt und Umschläge bleiben serverseitig für ENVELOPE_RETENTION_DAYS
+ * liegen – so kann jeder Browser des Accounts (auch ein später dazugekommener)
+ * die eigenen wie fremden Nachrichten des Zeitraums entschlüsseln.
  */
 import {
   bytesToUtf8,
   createSenderKey,
   cryptoReady,
   decryptChannelMessage,
+  decryptKeyBackup,
+  deriveBackupKey,
   DeviceKeyBundle,
+  encryptKeyBackup,
+  fromB64,
+  generateBackupSalt,
   generateIdentityKeyPair,
   generateSignedPreKey,
   IdentityKeyPair,
+  KeyBackupContent,
+  KeyBackupInfo,
   KeyEnvelopeInfo,
   KeyEnvelopePayload,
   MessageInfo,
@@ -42,6 +56,7 @@ import {
   senderKeyDistribution,
   SendMessageRequest,
   SignedPreKeyPair,
+  toB64,
   utf8ToBytes,
   X3dhHeader,
   x3dhInitiate,
@@ -80,16 +95,38 @@ interface ReceivedSenderKeyRecord extends ReceivedSenderKey {
 
 /** Wie lange ein Bundle-Lookup (auch ein 404) im Speicher gültig bleibt. */
 const BUNDLE_CACHE_MS = 60_000;
-/** Verarbeitete Umschlag-IDs, gegen doppelte Zustellung (Event + Abholung). */
-const PROCESSED_LOG_LIMIT = 500;
+/**
+ * Verarbeitete Umschlag-IDs, gegen doppelte Verarbeitung. Seit dem
+ * Multi-Browser-Support bleiben Umschläge serverseitig liegen (Retention statt
+ * Löschen beim Ack) – das Log muss deshalb die ganze Mailbox abdecken.
+ */
+const PROCESSED_LOG_LIMIT = 2000;
 
 let db: CryptoDb | null = null;
 let currentUserId: string | null = null;
 let identity: IdentityKeyPair | null = null;
 let signedPreKey: SignedPreKeyPair | null = null;
 let initPromise: Promise<void> | null = null;
+/**
+ * Login-Passwort, bis init() es für das Schlüssel-Backup verbraucht hat
+ * (Multi-Browser). Lebt nur im Speicher und wird nach erfolgreichem
+ * Backup-Abgleich sofort verworfen – es wird NIE geloggt oder persistiert.
+ */
+let pendingPassword: string | null = null;
+/**
+ * In dieser Sitzung nicht entschlüsselbare Umschläge (Wert = Identität beim
+ * Versuch): bleiben in der Server-Mailbox liegen und werden erst nach einem
+ * Identitätswechsel (Backup-Übernahme) erneut versucht statt bei jedem Sync.
+ */
+const failedEnvelopes = new Map<string, string>();
 const bundleCache = new Map<string, { bundle: DeviceKeyBundle | null; fetchedAt: number }>();
 const keysChangedListeners = new Set<() => void>();
+
+/** In IndexedDB gemerkter Backup-Schlüssel (abgeleitet aus dem Passwort). */
+interface StoredBackupKey {
+  salt: string;
+  key: string;
+}
 
 function authFetch<T>(
   path: string,
@@ -118,6 +155,16 @@ function notifyKeysChanged(): void {
 }
 
 export const e2ee = {
+  /**
+   * Direkt nach erfolgreichem Passwort-Login/Registrieren aufrufen: init()
+   * braucht das Passwort einmalig, um den Backup-Schlüssel abzuleiten
+   * (Multi-Browser). Ohne Stash läuft init() mit dem in IndexedDB gemerkten
+   * Schlüssel weiter (Session-Restore) bzw. lässt das Backup unangetastet.
+   */
+  stashLoginPassword(password: string): void {
+    pendingPassword = password;
+  },
+
   /** Nach Login aufrufen: Schlüssel laden/erzeugen und veröffentlichen. */
   init(userId: string): Promise<void> {
     if (currentUserId === userId && initPromise) return initPromise;
@@ -140,6 +187,17 @@ export const e2ee = {
           spk = generateSignedPreKey(id);
           await openedDb.put('kv', 'identity', id);
           await openedDb.put('kv', 'spk', spk);
+        }
+        // Multi-Browser: Schlüssel-Backup abgleichen – existiert eins, wird
+        // dessen Identität übernommen (alle Browser des Accounts teilen sich
+        // EINE Identität); sonst wird das eigene Material hochgeladen.
+        try {
+          ({ id, spk } = await syncKeyBackup(openedDb, id, spk));
+          pendingPassword = null;
+        } catch (err) {
+          // Backup-Probleme (z. B. Netzfehler) blockieren E2EE nicht – der
+          // nächste (Re-)Connect versucht den Abgleich erneut.
+          console.warn('Schlüssel-Backup-Abgleich fehlgeschlagen:', err);
         }
         // Öffentliche Schlüssel bei jedem Login veröffentlichen (idempotent) –
         // deckt auch den Fall ab, dass die Server-DB zurückgesetzt wurde.
@@ -181,6 +239,8 @@ export const e2ee = {
     identity = null;
     signedPreKey = null;
     initPromise = null;
+    pendingPassword = null;
+    failedEnvelopes.clear();
     bundleCache.clear();
   },
 
@@ -268,6 +328,114 @@ export const e2ee = {
 
 // --- interne Helfer -----------------------------------------------------------
 
+/**
+ * Schlüssel-Backup abgleichen (Multi-Browser). Ablauf:
+ *  - Backup vorhanden und zu öffnen (gemerkter Schlüssel oder frisches
+ *    Login-Passwort) → dessen Identität übernehmen, falls sie von der lokalen
+ *    abweicht. Empfangene Sender-Keys bleiben gültig (symmetrisch), nur die
+ *    identitätsgebundenen 1:1-Sessions werden verworfen und bauen sich neu auf.
+ *  - Kein Backup → eigenes Material verschlüsselt hochladen (onlyIfMissing:
+ *    verlieren zwei Browser das Rennen, übernimmt der zweite das des ersten).
+ *  - Backup nicht zu öffnen (anderes Passwort) → mit frischem Passwort durch
+ *    ein neues aus den lokalen Schlüsseln ersetzen; ohne Passwort unverändert
+ *    mit den lokalen Schlüsseln weiterarbeiten.
+ */
+async function syncKeyBackup(
+  database: CryptoDb,
+  id: IdentityKeyPair,
+  spk: SignedPreKeyPair,
+): Promise<{ id: IdentityKeyPair; spk: SignedPreKeyPair }> {
+  const password = pendingPassword;
+  const stored = (await database.get<StoredBackupKey>('kv', 'backupKey')) ?? null;
+
+  let backup: KeyBackupInfo | null;
+  try {
+    backup = await authFetch<KeyBackupInfo>('/api/keys/backup');
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) backup = null;
+    else throw err;
+  }
+
+  if (!backup) {
+    let kek = stored;
+    if (!kek && password) {
+      const salt = generateBackupSalt();
+      kek = { salt, key: toB64(await deriveBackupKey(password, salt)) };
+    }
+    // Ohne Passwort und ohne gemerkten Schlüssel lässt sich kein Backup
+    // anlegen – passiert beim nächsten Passwort-Login.
+    if (!kek) return { id, spk };
+    const blob = encryptKeyBackup({ identity: id, signedPreKey: spk }, fromB64(kek.key), kek.salt);
+    try {
+      await authFetch<void>('/api/keys/backup', {
+        method: 'PUT',
+        body: {
+          salt: blob.salt,
+          nonce: blob.nonce,
+          ciphertext: blob.ciphertext,
+          onlyIfMissing: true,
+        },
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Ein anderer Browser hat gerade zuerst hochgeladen – seins übernehmen.
+        return syncKeyBackup(database, id, spk);
+      }
+      throw err;
+    }
+    await database.put('kv', 'backupKey', kek);
+    return { id, spk };
+  }
+
+  // Backup vorhanden: Schlüssel besorgen (gemerkt oder aus dem Passwort ableiten).
+  let kek = stored && stored.salt === backup.salt ? stored : null;
+  if (!kek && password) {
+    kek = { salt: backup.salt, key: toB64(await deriveBackupKey(password, backup.salt)) };
+  }
+  if (!kek) return { id, spk }; // ohne Passwort nicht zu öffnen – später erneut
+
+  let content: KeyBackupContent;
+  try {
+    content = decryptKeyBackup(
+      { v: 1, salt: backup.salt, nonce: backup.nonce, ciphertext: backup.ciphertext },
+      fromB64(kek.key),
+    );
+  } catch {
+    if (!password) return { id, spk };
+    // Totes Backup (z. B. unter anderem Passwort angelegt): mit dem frisch
+    // bestätigten Passwort durch ein neues aus den lokalen Schlüsseln ersetzen.
+    console.warn('Schlüssel-Backup nicht entschlüsselbar – wird ersetzt');
+    const salt = generateBackupSalt();
+    const fresh: StoredBackupKey = { salt, key: toB64(await deriveBackupKey(password, salt)) };
+    const blob = encryptKeyBackup({ identity: id, signedPreKey: spk }, fromB64(fresh.key), salt);
+    await authFetch<void>('/api/keys/backup', {
+      method: 'PUT',
+      body: { salt: blob.salt, nonce: blob.nonce, ciphertext: blob.ciphertext },
+    });
+    await database.put('kv', 'backupKey', fresh);
+    return { id, spk };
+  }
+
+  await database.put('kv', 'backupKey', kek);
+  if (content.identity.signPublicKey === id.signPublicKey) return { id, spk };
+
+  // Identität aus dem Backup übernehmen.
+  await database.put('kv', 'identity', content.identity);
+  await database.put('kv', 'spk', content.signedPreKey);
+  await database.clear('sessions');
+  return { id: content.identity, spk: content.signedPreKey };
+}
+
+/** Eigenes öffentliches Bündel – für die Sender-Key-Verteilung an sich selbst. */
+function ownBundle(): DeviceKeyBundle {
+  return {
+    userId: currentUserId!,
+    identityKey: identity!.signPublicKey,
+    signedPreKey: signedPreKey!.publicKey,
+    signedPreKeySignature: signedPreKey!.signature,
+  };
+}
+
 async function createOwnSenderKeyRecord(
   database: CryptoDb,
   channelId: string,
@@ -311,9 +479,13 @@ async function distributeSenderKey(
   memberIds: string[],
 ): Promise<void> {
   const distribution = JSON.stringify(senderKeyDistribution(record.key, channelId));
-  for (const memberId of memberIds) {
-    if (memberId === currentUserId) continue;
-    const bundle = await fetchBundle(memberId);
+  // Auch an SICH SELBST verteilen (Multi-Browser): Andere Browser desselben
+  // Accounts teilen über das Schlüssel-Backup dieselbe Identität und lesen
+  // den Umschlag aus der Mailbox – erst dadurch sind die eigenen Nachrichten
+  // auch dort entschlüsselbar. Das eigene Bündel liegt lokal vor.
+  const recipients = [...new Set([currentUserId!, ...memberIds])];
+  for (const memberId of recipients) {
+    const bundle = memberId === currentUserId ? ownBundle() : await fetchBundle(memberId);
     if (!bundle) continue;
     // „Schon verteilt“ zählt nur, solange der Identitätsschlüssel derselbe ist:
     // Nach einem Schlüssel-Reset (neuer Browser) braucht das Mitglied den
@@ -370,18 +542,19 @@ async function encryptEnvelopeTo(
   };
 }
 
-/** Verarbeitet einen Umschlag: Session finden/aufbauen, Sender-Key ablegen, Ack. */
+/**
+ * Verarbeitet einen Umschlag: Session finden/aufbauen, Sender-Key ablegen.
+ * Umschläge bleiben serverseitig liegen (Retention, Multi-Browser) – welche
+ * schon verarbeitet sind, merkt sich jeder Browser selbst.
+ */
 async function processEnvelope(envelope: KeyEnvelopeInfo): Promise<void> {
   const database = db!;
   await withLock(async () => {
     const processed = (await database.get<string[]>('kv', 'processedEnvelopes')) ?? [];
-    if (processed.includes(envelope.id)) {
-      // Schon verarbeitet – aber das damalige Ack könnte fehlgeschlagen sein.
-      // Erneut quittieren (DELETE ist idempotent), sonst bleibt der Umschlag
-      // dauerhaft in der Mailbox liegen.
-      await authFetch<void>(`/api/envelopes/${envelope.id}`, { method: 'DELETE' });
-      return;
-    }
+    if (processed.includes(envelope.id)) return;
+    // In dieser Sitzung bereits gescheitert (z. B. an eine andere Identität
+    // gerichtet): erst nach einem Identitätswechsel erneut versuchen.
+    if (failedEnvelopes.get(envelope.id) === identity!.signPublicKey) return;
 
     const payload = envelope.payload;
     try {
@@ -426,13 +599,17 @@ async function processEnvelope(envelope: KeyEnvelopeInfo): Promise<void> {
         } satisfies ReceivedSenderKeyRecord);
       }
     } catch (err) {
-      // Nicht entschlüsselbare Umschläge (z. B. nach eigenem Schlüssel-Reset)
-      // trotzdem quittieren, sonst blockieren sie die Mailbox dauerhaft.
-      console.warn('Schlüssel-Umschlag nicht verarbeitbar:', err);
+      // Nicht entschlüsselbar (z. B. an eine andere Identität dieses Accounts
+      // gerichtet, Migration auf das Schlüssel-Backup): NICHT als verarbeitet
+      // markieren – nach einer Identitätsübernahme klappt es womöglich doch.
+      // Bis dahin verhindert failedEnvelopes wiederholte Versuche pro Sync.
+      failedEnvelopes.set(envelope.id, identity!.signPublicKey);
+      console.warn('Schlüssel-Umschlag (noch) nicht verarbeitbar:', err);
+      return;
     }
 
+    failedEnvelopes.delete(envelope.id);
     processed.push(envelope.id);
     await database.put('kv', 'processedEnvelopes', processed.slice(-PROCESSED_LOG_LIMIT));
-    await authFetch<void>(`/api/envelopes/${envelope.id}`, { method: 'DELETE' });
   });
 }

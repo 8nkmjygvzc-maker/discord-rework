@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -8,6 +9,8 @@ import {
 import {
   cryptoReady,
   DeviceKeyBundle,
+  ENVELOPE_RETENTION_DAYS,
+  KeyBackupInfo,
   KeyEnvelopeInfo,
   KeyEnvelopePayload,
   verifySignedPreKey,
@@ -17,12 +20,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { VisibilityService } from '../gateway/visibility.service';
 import { RegisterKeysDto } from './dto/register-keys.dto';
+import { SaveKeyBackupDto } from './dto/save-key-backup.dto';
 import { SendEnvelopeDto } from './dto/send-envelope.dto';
 
 /** Obergrenze für Umschläge – eine Sender-Key-Verteilung ist < 2 KiB. */
 const MAX_ENVELOPE_BYTES = 16 * 1024;
 /** Mailbox-Limit pro Empfänger – schützt vor Zumüllen durch einen Angreifer. */
 const MAX_MAILBOX_SIZE = 1000;
+/** Backup-Blob-Limit (Identität + Prekey sind < 2 KiB, großzügig bemessen). */
+const MAX_BACKUP_BYTES = 16 * 1024;
 
 /**
  * Schlüsselverwaltung (Phase 6): speichert ausschließlich ÖFFENTLICHE
@@ -44,10 +50,13 @@ export class KeysService implements OnModuleInit {
   }
 
   /**
-   * Registriert bzw. erneuert die Geräteschlüssel des Nutzers (v1: ein Gerät
-   * pro Account). Ein Wechsel des Identitätsschlüssels ist ein Schlüssel-Reset
-   * (z. B. neuer Browser) – alte Umschläge sind dann unlesbar und werden
-   * verworfen.
+   * Registriert bzw. erneuert die veröffentlichten Schlüssel des Accounts.
+   * Seit dem Multi-Browser-Support teilen sich alle Browser eines Accounts
+   * über das Schlüssel-Backup dieselbe Identität; ein Identitätswechsel kommt
+   * nur noch während der Migration bzw. nach einem Backup-Reset vor. Umschläge
+   * werden dabei bewusst NICHT mehr gelöscht: An die (Backup-)Identität
+   * gerichtete Umschläge bleiben für andere Browser lesbar, unlesbare laufen
+   * über die Retention-Frist ohnehin ab.
    */
   async registerKeys(userId: string, dto: RegisterKeysDto): Promise<void> {
     const valid = verifySignedPreKey({
@@ -59,16 +68,51 @@ export class KeysService implements OnModuleInit {
     if (!valid) {
       throw new BadRequestException('Prekey-Signatur passt nicht zum Identitätsschlüssel');
     }
-
-    const existing = await this.prisma.device.findUnique({ where: { userId } });
-    if (existing && existing.identityKey !== dto.identityKey) {
-      // Schlüssel-Reset: an alte Sessions gerichtete Umschläge sind wertlos.
-      await this.prisma.keyEnvelope.deleteMany({ where: { toUserId: userId } });
-    }
     await this.prisma.device.upsert({
       where: { userId },
       create: { userId, ...dto },
       update: { ...dto },
+    });
+  }
+
+  /** Verschlüsseltes Schlüssel-Backup des Nutzers (404, wenn keins existiert). */
+  async getBackup(userId: string): Promise<KeyBackupInfo> {
+    const backup = await this.prisma.keyBackup.findUnique({ where: { userId } });
+    if (!backup) throw new NotFoundException('Kein Schlüssel-Backup vorhanden');
+    return {
+      salt: backup.salt,
+      nonce: backup.nonce,
+      ciphertext: backup.ciphertext,
+      updatedAt: backup.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Schlüssel-Backup speichern. `onlyIfMissing` schützt den Erst-Upload: Wenn
+   * zwei Browser gleichzeitig ihr erstes Backup hochladen, gewinnt genau
+   * einer – der andere bekommt 409, lädt das gespeicherte Backup und
+   * übernimmt dessen Identität.
+   */
+  async saveBackup(userId: string, dto: SaveKeyBackupDto): Promise<void> {
+    if (dto.salt.length + dto.nonce.length + dto.ciphertext.length > MAX_BACKUP_BYTES) {
+      throw new BadRequestException('Schlüssel-Backup ist zu groß');
+    }
+    const data = { salt: dto.salt, nonce: dto.nonce, ciphertext: dto.ciphertext };
+    if (dto.onlyIfMissing) {
+      try {
+        await this.prisma.keyBackup.create({ data: { userId, ...data } });
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          throw new ConflictException('Es existiert bereits ein Schlüssel-Backup');
+        }
+        throw err;
+      }
+      return;
+    }
+    await this.prisma.keyBackup.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
     });
   }
 
@@ -121,19 +165,34 @@ export class KeysService implements OnModuleInit {
     ]);
   }
 
-  /** Ungelesene Umschläge des Nutzers, älteste zuerst (für den Login-Abgleich). */
+  /**
+   * Umschläge des Nutzers, älteste zuerst (für den Login-Abgleich). Seit dem
+   * Multi-Browser-Support bleiben Umschläge bis zum Ablauf der Retention
+   * liegen (JEDER Browser des Accounts muss sie lesen können, welche er schon
+   * verarbeitet hat, merkt sich der Client selbst); Abgelaufenes wird hier
+   * nebenbei aufgeräumt.
+   */
   async listEnvelopes(userId: string): Promise<KeyEnvelopeInfo[]> {
+    const cutoff = new Date(Date.now() - ENVELOPE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    await this.prisma.keyEnvelope.deleteMany({
+      where: { toUserId: userId, createdAt: { lt: cutoff } },
+    });
     const envelopes = await this.prisma.keyEnvelope.findMany({
       where: { toUserId: userId },
       orderBy: { createdAt: 'asc' },
-      take: 200,
+      take: MAX_MAILBOX_SIZE,
     });
     return envelopes.map(toEnvelopeInfo);
   }
 
-  /** Ack: Empfänger hat den Umschlag verarbeitet → löschen (idempotent). */
-  async ackEnvelope(userId: string, envelopeId: string): Promise<void> {
-    await this.prisma.keyEnvelope.deleteMany({ where: { id: envelopeId, toUserId: userId } });
+  /**
+   * Ack eines Umschlags – seit dem Multi-Browser-Support bewusst ein No-op:
+   * Andere Browser desselben Accounts brauchen den Umschlag noch, gelöscht
+   * wird erst über die Retention (listEnvelopes). Der Endpunkt bleibt für
+   * ältere Clients bestehen, damit deren Acks nichts kaputt machen.
+   */
+  ackEnvelope(_userId: string, _envelopeId: string): Promise<void> {
+    return Promise.resolve();
   }
 }
 

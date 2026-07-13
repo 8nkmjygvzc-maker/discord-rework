@@ -348,7 +348,12 @@ export const useServersStore = create<ServersState>()((set, get) => ({
                   ...s.selectedServer,
                   members: s.selectedServer.members.map((m) =>
                     m.userId === user.id
-                      ? { ...m, avatarUrl: user.avatarUrl, status: user.status }
+                      ? {
+                          ...m,
+                          avatarUrl: user.avatarUrl,
+                          bannerUrl: user.bannerUrl,
+                          status: user.status,
+                        }
                       : m,
                   ),
                 },

@@ -203,7 +203,13 @@ function UserList({
             key={user.id}
             className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-zinc-700/40"
           >
-            <div className="relative">
+            {/* Klick auf Avatar/Name öffnet die Profilkarte. */}
+            <button
+              type="button"
+              title={`Profil von ${user.username} ansehen`}
+              onClick={() => useUiStore.getState().openProfile({ ...user })}
+              className="relative shrink-0 cursor-pointer"
+            >
               <Avatar name={user.username} avatarUrl={user.avatarUrl} sizeClass="h-9 w-9" />
               {status && (
                 <span
@@ -213,9 +219,16 @@ function UserList({
                   }`}
                 />
               )}
-            </div>
+            </button>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-zinc-100">{user.username}</p>
+              <button
+                type="button"
+                title={`Profil von ${user.username} ansehen`}
+                onClick={() => useUiStore.getState().openProfile({ ...user })}
+                className="block max-w-full cursor-pointer truncate text-sm font-semibold text-zinc-100 hover:underline"
+              >
+                {user.username}
+              </button>
               {/* Eigener Status-Text vor dem Online-Zustand (Phase 15). */}
               <p className="truncate text-xs text-zinc-500">
                 {user.status || (status ? (status === 'online' ? 'Online' : 'Offline') : ' ')}

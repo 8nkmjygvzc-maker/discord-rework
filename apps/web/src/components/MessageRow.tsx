@@ -46,6 +46,8 @@ interface MessageRowProps {
   senderColor: string | null;
   /** Profilbild des Absenders (Phase 15) – null = Initialen-Platzhalter. */
   senderAvatarUrl: string | null;
+  /** Klick auf Avatar/Name → Profilkarte des Absenders. */
+  onShowProfile: () => void;
   onToggleReaction: (emoji: string, mine: boolean) => void;
   onReply: () => void;
   onOpenThread: () => void;
@@ -73,6 +75,7 @@ export default function MessageRow({
   flash,
   senderColor,
   senderAvatarUrl,
+  onShowProfile,
   onToggleReaction,
   onReply,
   onOpenThread,
@@ -147,18 +150,28 @@ export default function MessageRow({
     >
       <div className="w-9 shrink-0">
         {!grouped && (
-          <Avatar name={message.senderUsername} avatarUrl={senderAvatarUrl} sizeClass="h-9 w-9" />
+          <button
+            type="button"
+            title={`Profil von ${message.senderUsername} ansehen`}
+            onClick={onShowProfile}
+            className="cursor-pointer rounded-full transition hover:brightness-110"
+          >
+            <Avatar name={message.senderUsername} avatarUrl={senderAvatarUrl} sizeClass="h-9 w-9" />
+          </button>
         )}
       </div>
       <div className="min-w-0 flex-1">
         {!grouped && (
           <p className="text-sm">
-            <span
-              className={`font-semibold ${isOwn ? 'text-indigo-400' : 'text-zinc-200'}`}
+            <button
+              type="button"
+              title={`Profil von ${message.senderUsername} ansehen`}
+              onClick={onShowProfile}
+              className={`cursor-pointer font-semibold hover:underline ${isOwn ? 'text-indigo-400' : 'text-zinc-200'}`}
               style={senderColor ? { color: senderColor } : undefined}
             >
               {message.senderUsername}
-            </span>
+            </button>
             <span className="ml-2 text-xs text-zinc-500">
               {new Date(message.createdAt).toLocaleString('de-DE', {
                 day: '2-digit',

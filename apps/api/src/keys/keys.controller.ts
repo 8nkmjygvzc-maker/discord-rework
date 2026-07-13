@@ -11,12 +11,13 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import type { DeviceKeyBundle, KeyEnvelopeInfo } from '@parley/shared';
+import type { DeviceKeyBundle, KeyBackupInfo, KeyEnvelopeInfo } from '@parley/shared';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard';
 import type { AccessTokenPayload } from '../auth/auth.service';
 import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { KeysService } from './keys.service';
 import { RegisterKeysDto } from './dto/register-keys.dto';
+import { SaveKeyBackupDto } from './dto/save-key-backup.dto';
 import { SendEnvelopeDto } from './dto/send-envelope.dto';
 
 @Controller()
@@ -30,6 +31,23 @@ export class KeysController {
   @RateLimit({ limit: 10, windowS: 60 })
   register(@CurrentUser() user: AccessTokenPayload, @Body() dto: RegisterKeysDto): Promise<void> {
     return this.keys.registerKeys(user.sub, dto);
+  }
+
+  /** Eigenes verschlüsseltes Schlüssel-Backup abrufen (Multi-Browser). */
+  @Get('keys/backup')
+  getBackup(@CurrentUser() user: AccessTokenPayload): Promise<KeyBackupInfo> {
+    return this.keys.getBackup(user.sub);
+  }
+
+  /** Eigenes verschlüsseltes Schlüssel-Backup speichern (Multi-Browser). */
+  @Put('keys/backup')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RateLimit({ limit: 10, windowS: 60 })
+  saveBackup(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: SaveKeyBackupDto,
+  ): Promise<void> {
+    return this.keys.saveBackup(user.sub, dto);
   }
 
   /** Schlüsselbündel eines Nutzers für X3DH (nur öffentliche Schlüssel). */

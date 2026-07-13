@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import { ApiError } from '../lib/api';
+import { e2ee } from '../lib/e2ee';
 
 type Mode = 'login' | 'register';
 
@@ -25,6 +26,9 @@ export default function AuthPage() {
       } else {
         await login(email.trim(), password);
       }
+      // Multi-Browser-E2EE: init() leitet daraus einmalig den Schlüssel für
+      // das Schlüssel-Backup ab (nur im Speicher, wird danach verworfen).
+      e2ee.stashLoginPassword(password);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Server nicht erreichbar');
     } finally {

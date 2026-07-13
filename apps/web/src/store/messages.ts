@@ -226,6 +226,8 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
   },
 
   handleMessageCreate: (message) => {
+    // DM-Liste nach Aktivität sortiert halten (ignoriert Server-Kanäle).
+    useDmsStore.getState().bumpActivity(message.channelId, message.createdAt);
     set((s) => {
       const next: Partial<MessagesState> = {};
       // Wer eine Nachricht abschickt, tippt nicht mehr → Anzeige sofort weg.

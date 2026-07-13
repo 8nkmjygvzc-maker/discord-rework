@@ -128,12 +128,13 @@ export interface PresenceUpdatePayload {
   online: boolean;
 }
 
-/** Profilaktualisierung (Status/Avatar, Phase 15) – Form wie PublicUser. */
+/** Profilaktualisierung (Status/Avatar/Banner, Phase 15) – Form wie PublicUser. */
 export interface UserUpdatePayload {
   user: {
     id: string;
     username: string;
     avatarUrl: string | null;
+    bannerUrl: string | null;
     status: string;
   };
 }

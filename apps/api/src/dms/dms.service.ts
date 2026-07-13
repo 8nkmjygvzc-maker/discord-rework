@@ -96,7 +96,12 @@ export class DmsService {
       where: { userId },
       include: {
         channel: {
-          include: { dmMembers: { include: { user: { select: publicUserSelect } } } },
+          include: {
+            dmMembers: { include: { user: { select: publicUserSelect } } },
+            // Zeitstempel der jüngsten Nachricht – sortiert die DM-Liste nach
+            // Aktivität (neueste Unterhaltung zuerst).
+            messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+          },
         },
       },
     });
@@ -104,13 +109,26 @@ export class DmsService {
       .map((m) => {
         const other = m.channel.dmMembers.find((x) => x.userId !== userId);
         // Defensiv: Kanal ohne Gegenseite (sollte nicht vorkommen) überspringen.
-        return other ? toDmChannelInfo(m.channel, toPublicUser(other.user)) : null;
+        return other
+          ? toDmChannelInfo(m.channel, toPublicUser(other.user), m.channel.messages[0]?.createdAt)
+          : null;
       })
       .filter((c): c is DmChannelInfo => c !== null)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      .sort((a, b) =>
+        (b.lastMessageAt ?? b.createdAt).localeCompare(a.lastMessageAt ?? a.createdAt),
+      );
   }
 }
 
-function toDmChannelInfo(channel: Channel, otherUser: PublicUser): DmChannelInfo {
-  return { id: channel.id, otherUser, createdAt: channel.createdAt.toISOString() };
+function toDmChannelInfo(
+  channel: Channel,
+  otherUser: PublicUser,
+  lastMessageAt?: Date,
+): DmChannelInfo {
+  return {
+    id: channel.id,
+    otherUser,
+    createdAt: channel.createdAt.toISOString(),
+    lastMessageAt: lastMessageAt?.toISOString() ?? null,
+  };
 }

@@ -18,6 +18,8 @@ export interface ServerMember {
   nickname: string | null;
   /** Profilbild (Phase 15) – null = Initialen-Platzhalter. */
   avatarUrl: string | null;
+  /** Profil-Banner für die Profilkarte – null = Farbverlauf. */
+  bannerUrl: string | null;
   /** Status-Text des Nutzers („Was machst du gerade?“, Phase 15). */
   status: string;
   joinedAt: string;

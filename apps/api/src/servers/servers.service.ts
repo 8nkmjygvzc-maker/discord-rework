@@ -31,12 +31,17 @@ import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 
 type MembershipWithUser = Membership & {
-  user: Pick<User, 'username' | 'avatarUrl' | 'status'>;
+  user: Pick<User, 'username' | 'avatarUrl' | 'bannerUrl' | 'status'>;
   roles: { roleId: string }[];
 };
 
 /** Prisma-Select für den User-Anteil eines ServerMember (Phase 15: +Profil). */
-export const MEMBER_USER_SELECT = { username: true, avatarUrl: true, status: true } as const;
+export const MEMBER_USER_SELECT = {
+  username: true,
+  avatarUrl: true,
+  bannerUrl: true,
+  status: true,
+} as const;
 
 @Injectable()
 export class ServersService {
@@ -423,6 +428,7 @@ export function toServerMember(m: MembershipWithUser): ServerMember {
     username: m.user.username,
     nickname: m.nickname,
     avatarUrl: m.user.avatarUrl,
+    bannerUrl: m.user.bannerUrl,
     status: m.user.status,
     joinedAt: m.joinedAt.toISOString(),
     roleIds: m.roles.map((r) => r.roleId),

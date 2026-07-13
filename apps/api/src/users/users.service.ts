@@ -31,6 +31,7 @@ export class UsersService {
         ...(dto.status !== undefined ? { status: dto.status } : {}),
         // '' = Bild entfernen (Upload ist der einzige Weg, eines zu setzen).
         ...(dto.avatarUrl !== undefined ? { avatarUrl: null } : {}),
+        ...(dto.bannerUrl !== undefined ? { bannerUrl: null } : {}),
       },
     });
     const result = toAuthUser(user);
@@ -76,10 +77,51 @@ export class UsersService {
     if (!user?.avatarUrl?.startsWith(`/api/users/${userId}/avatar`)) {
       throw new NotFoundException('Kein Profilbild vorhanden');
     }
+    return this.streamProfileImage(avatarKey(userId), 'Kein Profilbild vorhanden');
+  }
+
+  /** Profil-Banner hochladen – gleiche Regeln wie der Avatar (unverschlüsselt). */
+  async setBanner(userId: string, data: Buffer): Promise<AuthUser> {
+    if (data.length === 0) throw new BadRequestException('Leeres Bild');
+    if (data.length > MAX_PROFILE_IMAGE_BYTES) {
+      throw new BadRequestException('Banner ist zu groß (max. 2 MiB)');
+    }
+    const contentType = detectImageContentType(data);
+    if (!contentType) {
+      throw new BadRequestException('Nur Bilder (PNG, JPEG, WebP, GIF) sind erlaubt');
+    }
+    await this.storage.putObject(bannerKey(userId), data, contentType);
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { bannerUrl: `/api/users/${userId}/banner?v=${Date.now()}` },
+    });
+    const result = toAuthUser(user);
+    await this.broadcastProfileUpdate(result);
+    return result;
+  }
+
+  /** Banner-Blob streamen – öffentlich (siehe UsersPublicController). */
+  async getBannerStream(
+    userId: string,
+  ): Promise<{ stream: Readable; sizeBytes: number; contentType: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { bannerUrl: true },
+    });
+    if (!user?.bannerUrl?.startsWith(`/api/users/${userId}/banner`)) {
+      throw new NotFoundException('Kein Banner vorhanden');
+    }
+    return this.streamProfileImage(bannerKey(userId), 'Kein Banner vorhanden');
+  }
+
+  private async streamProfileImage(
+    objectKey: string,
+    notFoundMessage: string,
+  ): Promise<{ stream: Readable; sizeBytes: number; contentType: string }> {
     try {
       const [stat, stream] = await Promise.all([
-        this.storage.statObject(avatarKey(userId)),
-        this.storage.getObjectStream(avatarKey(userId)),
+        this.storage.statObject(objectKey),
+        this.storage.getObjectStream(objectKey),
       ]);
       return {
         stream,
@@ -87,7 +129,7 @@ export class UsersService {
         contentType: stat.contentType ?? 'application/octet-stream',
       };
     } catch {
-      throw new NotFoundException('Kein Profilbild vorhanden');
+      throw new NotFoundException(notFoundMessage);
     }
   }
 
@@ -105,6 +147,7 @@ export class UsersService {
           id: user.id,
           username: user.username,
           avatarUrl: user.avatarUrl,
+          bannerUrl: user.bannerUrl,
           status: user.status,
         },
       },
@@ -116,4 +159,9 @@ export class UsersService {
 /** Objektschlüssel des Avatars im (gemeinsamen) MinIO-Bucket. */
 function avatarKey(userId: string): string {
   return `avatars/${userId}`;
+}
+
+/** Objektschlüssel des Profil-Banners im (gemeinsamen) MinIO-Bucket. */
+function bannerKey(userId: string): string {
+  return `banners/${userId}`;
 }

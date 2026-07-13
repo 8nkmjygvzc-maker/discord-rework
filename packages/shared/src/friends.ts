@@ -5,6 +5,8 @@ export interface PublicUser {
   id: string;
   username: string;
   avatarUrl: string | null;
+  /** Profil-Banner (Querformat) für die Profilkarte, null = Farbverlauf. */
+  bannerUrl: string | null;
   status: string;
 }
 
@@ -37,6 +39,8 @@ export interface DmChannelInfo {
   id: string;
   otherUser: PublicUser;
   createdAt: string;
+  /** Zeitstempel der letzten Nachricht (null = noch keine) – sortiert die DM-Liste. */
+  lastMessageAt: string | null;
 }
 
 /** Body von POST /api/dms – öffnet (oder findet) den DM-Kanal zu einem Nutzer. */
