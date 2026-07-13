@@ -9,7 +9,10 @@ import { AppModule } from './app.module';
 import { GatewayService } from './gateway/gateway.service';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // bodyParser: false → wir registrieren JSON/urlencoded unten selbst, weil das
+  // Schlüssel-Backup (verschlüsselter Zustands-Blob) das 100-kB-Standardlimit
+  // des automatischen JSON-Parsers überschreiten kann.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   // Hinter einem Reverse-Proxy (Phase 14): TRUST_PROXY setzen, damit Express
   // `req.ip` aus X-Forwarded-For nimmt – sonst drosselt das Rate-Limit alle
   // Nutzer gemeinsam unter der Proxy-IP. Wert = Hop-Zahl (z. B. `1`) oder ein
@@ -31,6 +34,10 @@ async function bootstrap(): Promise<void> {
       limit: MAX_ATTACHMENT_CIPHERTEXT_BYTES + 1024,
     }),
   );
+  // 2 MB statt der 100-kB-Voreinstellung: PUT /api/keys/backup trägt den
+  // verschlüsselten Client-Zustand (bis ~1 MiB Base64) im JSON-Body.
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ extended: true }));
   // whitelist: unbekannte Felder werden verworfen statt in die DB zu wandern.
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   const port = Number(process.env.API_PORT ?? 3001);

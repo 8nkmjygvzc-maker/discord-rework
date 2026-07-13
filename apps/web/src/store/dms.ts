@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import type { DmChannelInfo, PublicUser } from '@parley/shared';
+import type { DmChannelInfo, PublicUser, VoiceState } from '@parley/shared';
 import { useAuthStore } from './auth';
+import { useVoiceStore } from './voice';
 
 /**
  * DM-Kanäle des Nutzers (Phase 7). `selectedDmId` steuert die Home-Ansicht:
@@ -73,6 +74,13 @@ export const useDmsStore = create<DmsState>()((set, get) => ({
       // Auswahl validieren – der Kanal könnte (nach Reconnect) weg sein.
       selectedDmId: channels.some((c) => c.id === s.selectedDmId) ? s.selectedDmId : null,
     }));
+    // Anruf-Roster-Snapshot in den Voice-Store spiegeln (Login/Reconnect –
+    // Live-Änderungen kommen danach über VOICE_STATE_UPDATE).
+    const calls: Record<string, VoiceState[]> = {};
+    for (const c of channels) {
+      if (c.voiceStates.length > 0) calls[c.id] = c.voiceStates;
+    }
+    useVoiceStore.getState().setDmCallStates(calls);
   },
 
   openDm: async (userId) => {

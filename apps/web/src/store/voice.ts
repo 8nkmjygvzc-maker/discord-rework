@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import type {
+  CallDeclinePayload,
+  CallRingPayload,
   ChannelInfo,
   VoiceJoinResponse,
   VoiceState,
   VoiceStateUpdatePayload,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
-import { playSound } from '../lib/sounds';
+import { useNoticesStore } from './notices';
+import { playSound, startRingtone } from '../lib/sounds';
 // Nur Typen statisch – der VoiceClient (und damit mediasoup-client, ~700 KB) wird
 // erst beim ersten Beitritt dynamisch geladen (Code-Splitting, Phase 15).
 import type { VoiceClient, VideoTile } from '../lib/voice';
@@ -41,14 +44,26 @@ interface VoiceStoreState {
   error: string | null;
   /** Roster des ausgewählten Servers (alle seine Sprachkanäle). */
   voiceStates: VoiceState[];
+  /** Aktive private Anrufe: DM-Kanal-ID → Teilnehmer-Roster. */
+  dmCalls: Record<string, VoiceState[]>;
+  /** Eingehender privater Anruf (Overlay mit Annehmen/Ablehnen). */
+  incomingCall: CallRingPayload | null;
   /** Aktive Video-Streams (eigene + fremde) für die Video-Bühne. */
   videoTiles: VideoTile[];
   /** Wer gerade spricht (userId → true), aus der WebAudio-Pegelmessung (Phase 15). */
   speaking: Record<string, boolean>;
 
   setVoiceStates: (states: VoiceState[]) => void;
+  /** Anruf-Roster aus der DM-Liste übernehmen (Login/Reconnect-Snapshot). */
+  setDmCallStates: (byChannel: Record<string, VoiceState[]>) => void;
   handleVoiceStateUpdate: (d: VoiceStateUpdatePayload) => void;
-  joinVoice: (channel: ChannelInfo) => Promise<void>;
+  /** Eingehender Anruf (CALL_RING): Overlay + Klingelton. */
+  handleCallRing: (d: CallRingPayload) => void;
+  /** Gegenseite hat abgelehnt (CALL_DECLINE): Hinweis + Anruf beenden. */
+  handleCallDecline: (d: CallDeclinePayload) => void;
+  /** Eingehenden Anruf ablehnen (Overlay-Button). */
+  declineCall: () => Promise<void>;
+  joinVoice: (channel: ChannelInfo, opts?: { withCamera?: boolean }) => Promise<void>;
   /** `silent` unterdrückt den Disconnect-Sound (interner Kanalwechsel). */
   leaveVoice: (opts?: { silent?: boolean }) => Promise<void>;
   toggleMute: () => void;
@@ -73,6 +88,24 @@ function authFetch<T>(
 
 // Der VoiceClient hält Medienzustand (Transporte, Tracks) außerhalb des Stores.
 let client: VoiceClient | null = null;
+// Klingelton + Auto-Verwerfen des eingehenden Anrufs (außerhalb des Stores).
+let stopRingtone: (() => void) | null = null;
+let ringTimeout: ReturnType<typeof setTimeout> | null = null;
+/** Klingeln beenden (Sound + Timer); das Overlay steuert `incomingCall`. */
+function stopRinging(): void {
+  stopRingtone?.();
+  stopRingtone = null;
+  if (ringTimeout) clearTimeout(ringTimeout);
+  ringTimeout = null;
+}
+/** Eingehenden Anruf verwerfen, wenn er zu diesem Kanal gehört. */
+function dismissIncoming(channelId?: string): void {
+  const { incomingCall } = useVoiceStore.getState();
+  if (!incomingCall) return;
+  if (channelId && incomingCall.channelId !== channelId) return;
+  stopRinging();
+  useVoiceStore.setState({ incomingCall: null });
+}
 
 export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   activeChannelId: null,
@@ -85,12 +118,40 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   hasMic: false,
   error: null,
   voiceStates: [],
+  dmCalls: {},
+  incomingCall: null,
   videoTiles: [],
   speaking: {},
 
   setVoiceStates: (states) => set({ voiceStates: states }),
 
-  handleVoiceStateUpdate: (d) =>
+  setDmCallStates: (byChannel) => set({ dmCalls: byChannel }),
+
+  handleVoiceStateUpdate: (d) => {
+    // Privater Anruf (DM-Kanal): eigenen Roster pro Kanal pflegen – der
+    // Server-Roster unten wird bei jedem Serverwechsel überschrieben.
+    if (d.serverId === null) {
+      set((s) => {
+        const without = (s.dmCalls[d.channelId] ?? []).filter((v) => v.userId !== d.userId);
+        const next =
+          d.state === null
+            ? without
+            : [
+                ...without,
+                { channelId: d.channelId, userId: d.userId, username: d.username, ...d.state },
+              ];
+        const dmCalls = { ...s.dmCalls };
+        if (next.length === 0) delete dmCalls[d.channelId];
+        else dmCalls[d.channelId] = next;
+        return { dmCalls };
+      });
+      // Anrufer hat aufgelegt, bevor angenommen wurde → Klingeln beenden.
+      const call = get().incomingCall;
+      if (call && call.channelId === d.channelId && !get().dmCalls[d.channelId]?.length) {
+        dismissIncoming(d.channelId);
+      }
+      return;
+    }
     set((s) => {
       const without = s.voiceStates.filter((v) => v.userId !== d.userId);
       if (d.state === null) return { voiceStates: without };
@@ -100,11 +161,42 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
           { channelId: d.channelId, userId: d.userId, username: d.username, ...d.state },
         ],
       };
-    }),
+    });
+  },
 
-  joinVoice: async (channel) => {
+  handleCallRing: (d) => {
+    // Kein Overlay, wenn wir schon in genau diesem Anruf sitzen.
+    if (get().activeChannelId === d.channelId) return;
+    stopRinging();
+    set({ incomingCall: d });
+    stopRingtone = startRingtone();
+    // Verpasster Anruf: nach 45 s hört das Klingeln von selbst auf.
+    ringTimeout = setTimeout(() => dismissIncoming(), 45_000);
+  },
+
+  handleCallDecline: (d) => {
+    // Nur relevant, solange wir in diesem Anruf sitzen (allein wartend).
+    if (get().activeChannelId !== d.channelId) return;
+    useNoticesStore
+      .getState()
+      .pushNotice('Anruf abgelehnt', `${d.username} hat den Anruf abgelehnt.`);
+    void get().leaveVoice();
+  },
+
+  declineCall: async () => {
+    const call = get().incomingCall;
+    if (!call) return;
+    dismissIncoming();
+    await authFetch<void>(`/api/voice/channels/${call.channelId}/decline`, {
+      method: 'POST',
+    }).catch(() => undefined);
+  },
+
+  joinVoice: async (channel, opts) => {
     const self = useAuthStore.getState().user;
     if (!self) return;
+    // Beitritt beantwortet einen eventuell klingelnden Anruf dieses Kanals.
+    dismissIncoming(channel.id);
     // Bereits in DIESEM Kanal (verbunden oder verbindend)? Nichts tun – ein
     // erneuter Join würde die SFU-Verbindung ersetzen und deren onClosed-
     // Handler die Session abräumen („man fliegt raus beim Draufklicken").
@@ -163,6 +255,8 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       }
       set({ status: 'connected', hasMic: client.hasMic });
       playSound('connect');
+      // Videoanruf (🎥 im DM-Chat): Kamera direkt nach dem Verbinden starten.
+      if (opts?.withCamera) await get().toggleCamera();
     } catch (err) {
       client?.disconnect();
       client = null;
@@ -321,6 +415,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   reset: () => {
     client?.disconnect();
     client = null;
+    stopRinging();
     set({
       activeChannelId: null,
       activeServerId: null,
@@ -332,6 +427,8 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       hasMic: false,
       error: null,
       voiceStates: [],
+      dmCalls: {},
+      incomingCall: null,
       videoTiles: [],
       speaking: {},
     });

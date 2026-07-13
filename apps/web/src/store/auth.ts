@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { AuthResponse, AuthUser, UpdateProfileRequest } from '@parley/shared';
 import { apiDownload, apiFetch, apiUpload, ApiError } from '../lib/api';
+import { clearLoginSecret, provideLoginSecret } from '../lib/loginSecret';
 
 /**
  * Auth-Store: Der Access-Token lebt bewusst NUR im Speicher (kein
@@ -72,6 +73,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       method: 'POST',
       body: { username, email, password },
     });
+    // Fürs Schlüssel-Backup (E2EE-Init richtet es mit dem Passwort ein).
+    provideLoginSecret(password);
     set({ user: res.user, accessToken: res.accessToken });
   },
 
@@ -80,6 +83,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       method: 'POST',
       body: { email, password },
     });
+    // Fürs Schlüssel-Backup: erlaubt der E2EE-Init den Restore auf diesem Gerät.
+    provideLoginSecret(password);
     set({ user: res.user, accessToken: res.accessToken });
   },
 
@@ -87,6 +92,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     try {
       await apiFetch<void>('/api/auth/logout', { method: 'POST' });
     } finally {
+      clearLoginSecret();
       set({ user: null, accessToken: null });
     }
   },

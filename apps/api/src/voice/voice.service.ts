@@ -9,6 +9,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
+  CallDeclinePayload,
+  CallRingPayload,
   Permissions,
   VoiceJoinResponse,
   VoiceStateUpdatePayload,
@@ -18,7 +20,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { PermissionsService } from '../roles/permissions.service';
 import { RedisService } from '../redis/redis.service';
+import { FriendsService } from '../friends/friends.service';
 import { VoiceStateDto } from './dto/voice-state.dto';
+
+/** Kanal-Identität, die der Broadcast braucht (Server- oder DM-Kanal). */
+interface ChannelRef {
+  id: string;
+  serverId: string | null;
+}
 
 /** Gültigkeit des Voice-Tokens – nur der WS-Handshake zum SFU muss abgedeckt sein. */
 const VOICE_TOKEN_TTL = '120s';
@@ -62,6 +71,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly gateway: GatewayService,
     private readonly permissions: PermissionsService,
+    private readonly friends: FriendsService,
     private readonly jwt: JwtService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
@@ -118,31 +128,55 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Betritt einen Sprachkanal: Rechte prüfen, ggf. aus dem alten Kanal austreten
-   * (ein Nutzer = ein Sprachkanal), VoiceSession anlegen, Roster verteilen und
-   * ein kurzlebiges Voice-Token für den SFU ausstellen.
+   * Betritt einen Sprachkanal ODER startet/betritt einen privaten Anruf
+   * (DM-Kanal): Rechte prüfen, ggf. aus dem alten Kanal austreten (ein Nutzer =
+   * ein Sprachkanal), VoiceSession anlegen, Roster verteilen und ein
+   * kurzlebiges Voice-Token für den SFU ausstellen. Der SFU kennt keine
+   * Server – ein Raum pro Kanal-ID funktioniert für beide Kanalarten.
    */
   async join(userId: string, username: string, channelId: string): Promise<VoiceJoinResponse> {
-    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
-    if (!channel || !channel.serverId || channel.type !== 'VOICE') {
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      include: { dmMembers: { select: { userId: true } } },
+    });
+    const isDm = channel?.type === 'DM' && !channel.serverId;
+    if (!channel || (!isDm && !(channel.serverId && channel.type === 'VOICE'))) {
       throw new NotFoundException('Sprachkanal nicht gefunden');
     }
-    // Beitreten verlangt (wie Lesen) ViewChannels – wirft 404 für Nicht-Mitglieder,
-    // 403 ohne Recht. Eigene Connect/Speak-Rechte kommen später (siehe ROADMAP).
-    await this.permissions.requirePermission(channel.serverId, userId, Permissions.ViewChannels);
 
-    // Auszeit (Phase 13): blockiert auch den Beitritt zu Sprachkanälen.
-    const membership = await this.prisma.membership.findUnique({
-      where: { userId_serverId: { userId, serverId: channel.serverId } },
-      select: { timeoutUntil: true },
-    });
-    if (membership?.timeoutUntil && membership.timeoutUntil.getTime() > Date.now()) {
-      throw new ForbiddenException('Du bist in Auszeit und kannst keinem Sprachkanal beitreten');
+    let dmPartnerId: string | null = null;
+    if (channel.serverId) {
+      // Beitreten verlangt (wie Lesen) ViewChannels – wirft 404 für Nicht-Mitglieder,
+      // 403 ohne Recht. Eigene Connect/Speak-Rechte kommen später (siehe ROADMAP).
+      await this.permissions.requirePermission(channel.serverId, userId, Permissions.ViewChannels);
+
+      // Auszeit (Phase 13): blockiert auch den Beitritt zu Sprachkanälen.
+      const membership = await this.prisma.membership.findUnique({
+        where: { userId_serverId: { userId, serverId: channel.serverId } },
+        select: { timeoutUntil: true },
+      });
+      if (membership?.timeoutUntil && membership.timeoutUntil.getTime() > Date.now()) {
+        throw new ForbiddenException('Du bist in Auszeit und kannst keinem Sprachkanal beitreten');
+      }
+    } else {
+      // Privater Anruf: nur die beiden DM-Teilnehmer, 404 für Außenstehende
+      // (kein Existenz-Leak). Blockierung sperrt Anrufe in beide Richtungen –
+      // wie das Senden von Nachrichten (Phase 7).
+      if (!channel.dmMembers.some((m) => m.userId === userId)) {
+        throw new NotFoundException('Sprachkanal nicht gefunden');
+      }
+      dmPartnerId = channel.dmMembers.find((m) => m.userId !== userId)?.userId ?? null;
+      if (!dmPartnerId) throw new NotFoundException('Sprachkanal nicht gefunden');
+      if (await this.friends.isBlockedBetween(userId, dmPartnerId)) {
+        throw new ForbiddenException('Mit diesem Nutzer ist kein Anruf möglich');
+      }
     }
 
     // In einem anderen Sprachkanal? Erst dort sauber austreten (Kanalwechsel).
+    // `rejoin` = Reconnect in denselben Kanal (darf nicht erneut klingeln).
     const existing = await this.prisma.voiceSession.findUnique({ where: { userId } });
-    if (existing && existing.channelId !== channelId) {
+    const rejoin = existing?.channelId === channelId;
+    if (existing && !rejoin) {
       await this.removeSession(existing.channelId, userId, username);
     }
 
@@ -168,12 +202,33 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    await this.broadcast(channel.serverId, {
+    await this.broadcast(channel, {
       channelId,
+      serverId: channel.serverId,
       userId,
       username,
       state: { muted: false, deafened: false, cameraOn: false, screenOn: false },
     });
+
+    // Klingeln beim Anruf-Start: frischer Beitritt in einen DM-Kanal, in dem
+    // die Gegenseite noch nicht sitzt → CALL_RING nur an den Angerufenen.
+    if (dmPartnerId && !rejoin) {
+      const partnerInCall = await this.prisma.voiceSession.findFirst({
+        where: { userId: dmPartnerId, channelId },
+        select: { userId: true },
+      });
+      if (!partnerInCall) {
+        const caller = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { avatarUrl: true },
+        });
+        const ring: CallRingPayload = {
+          channelId,
+          caller: { id: userId, username, avatarUrl: caller?.avatarUrl ?? null },
+        };
+        await this.gateway.publishDispatch('CALL_RING', ring, [dmPartnerId]);
+      }
+    }
 
     const claims: VoiceTokenClaims = { sub: userId, username, channelId, purpose: 'voice' };
     const voiceToken = await this.jwt.signAsync(claims, { expiresIn: VOICE_TOKEN_TTL });
@@ -182,6 +237,24 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       voiceUrl: this.config.get<string>('VOICE_PUBLIC_URL') ?? '/voice',
       channelId,
     };
+  }
+
+  /**
+   * Eingehenden privaten Anruf ablehnen: reine Signalisierung an den Anrufer
+   * (CALL_DECLINE) – der Angerufene hatte nie eine VoiceSession.
+   */
+  async decline(userId: string, username: string, channelId: string): Promise<void> {
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      include: { dmMembers: { select: { userId: true } } },
+    });
+    if (!channel || channel.type !== 'DM' || !channel.dmMembers.some((m) => m.userId === userId)) {
+      throw new NotFoundException('Anruf nicht gefunden');
+    }
+    const partnerId = channel.dmMembers.find((m) => m.userId !== userId)?.userId;
+    if (!partnerId) return;
+    const payload: CallDeclinePayload = { channelId, userId, username };
+    await this.gateway.publishDispatch('CALL_DECLINE', payload, [partnerId]);
   }
 
   /** Verlässt den Sprachkanal (nur wenn die aktuelle Session zu diesem Kanal gehört). */
@@ -204,9 +277,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const session = await this.prisma.voiceSession.findUnique({
       where: { userId },
-      include: { channel: { select: { serverId: true } } },
+      include: { channel: { select: { id: true, serverId: true } } },
     });
-    if (!session || session.channelId !== channelId || !session.channel.serverId) {
+    if (!session || session.channelId !== channelId) {
       throw new NotFoundException('Keine aktive Sprachsitzung in diesem Kanal');
     }
     const muted = dto.muted || dto.deafened;
@@ -217,8 +290,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       where: { userId },
       data: { muted, deafened, cameraOn, screenOn },
     });
-    await this.broadcast(session.channel.serverId, {
+    await this.broadcast(session.channel, {
       channelId,
+      serverId: session.channel.serverId,
       userId,
       username,
       state: { muted, deafened, cameraOn, screenOn },
@@ -277,20 +351,37 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   private async removeSession(channelId: string, userId: string, username: string): Promise<void> {
     const channel = await this.prisma.channel.findUnique({
       where: { id: channelId },
-      select: { serverId: true },
+      select: { id: true, serverId: true },
     });
     // deleteMany statt delete: idempotent, wirft nicht, falls schon weg.
     const deleted = await this.prisma.voiceSession.deleteMany({ where: { userId, channelId } });
-    if (deleted.count === 0 || !channel?.serverId) return;
-    await this.broadcast(channel.serverId, { channelId, userId, username, state: null });
+    if (deleted.count === 0 || !channel) return;
+    await this.broadcast(channel, {
+      channelId,
+      serverId: channel.serverId,
+      userId,
+      username,
+      state: null,
+    });
   }
 
-  /** VOICE_STATE_UPDATE an alle Server-Mitglieder mit ViewChannels (wie MESSAGE_CREATE). */
-  private async broadcast(serverId: string, payload: VoiceStateUpdatePayload): Promise<void> {
-    const recipients = await this.permissions.getMemberIdsWithPermission(
-      serverId,
-      Permissions.ViewChannels,
-    );
+  /**
+   * VOICE_STATE_UPDATE verteilen: bei Server-Kanälen an alle Mitglieder mit
+   * ViewChannels (wie MESSAGE_CREATE), bei privaten Anrufen (DM) an die beiden
+   * Teilnehmer.
+   */
+  private async broadcast(channel: ChannelRef, payload: VoiceStateUpdatePayload): Promise<void> {
+    const recipients = channel.serverId
+      ? await this.permissions.getMemberIdsWithPermission(
+          channel.serverId,
+          Permissions.ViewChannels,
+        )
+      : (
+          await this.prisma.dmMember.findMany({
+            where: { channelId: channel.id },
+            select: { userId: true },
+          })
+        ).map((m) => m.userId);
     await this.gateway.publishDispatch('VOICE_STATE_UPDATE', payload, recipients);
   }
 }

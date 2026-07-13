@@ -39,6 +39,17 @@ export class VoiceController {
     return this.voice.leave(user.sub, user.username, id);
   }
 
+  /** Eingehenden privaten Anruf ablehnen (nur DM-Kanäle). */
+  @Post('channels/:id/decline')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RateLimit({ limit: 30, windowS: 60 })
+  decline(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    return this.voice.decline(user.sub, user.username, id);
+  }
+
   @Patch('channels/:id/state')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RateLimit({ limit: 60, windowS: 60 }) // Mute/Deafen-Toggeln drosseln (Broadcast-Spam)

@@ -44,13 +44,29 @@ export interface VoiceState {
 /**
  * Gateway-Event VOICE_STATE_UPDATE. `state === null` bedeutet: der Nutzer hat
  * den Sprachkanal verlassen. Geht an alle Mitglieder des Servers mit
- * ViewChannels (wie MESSAGE_CREATE).
+ * ViewChannels (wie MESSAGE_CREATE); bei privaten Anrufen (DM-Kanäle,
+ * `serverId === null`) an die beiden Teilnehmer.
  */
 export interface VoiceStateUpdatePayload {
   channelId: string;
+  /** null = DM-Kanal (privater Anruf) – Clients pflegen dann den Anruf-Roster. */
+  serverId: string | null;
   userId: string;
   username: string;
   state: { muted: boolean; deafened: boolean; cameraOn: boolean; screenOn: boolean } | null;
+}
+
+/** Gateway-Event CALL_RING: eingehender privater Anruf (nur an den Angerufenen). */
+export interface CallRingPayload {
+  channelId: string;
+  caller: { id: string; username: string; avatarUrl: string | null };
+}
+
+/** Gateway-Event CALL_DECLINE: der Angerufene hat abgelehnt (nur an den Anrufer). */
+export interface CallDeclinePayload {
+  channelId: string;
+  userId: string;
+  username: string;
 }
 
 /** Antwort auf POST /api/voice/channels/:id/join. */

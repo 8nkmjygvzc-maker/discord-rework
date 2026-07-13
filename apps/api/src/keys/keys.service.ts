@@ -8,16 +8,18 @@ import {
 import {
   cryptoReady,
   DeviceKeyBundle,
+  KeyBackupRecord,
   KeyEnvelopeInfo,
   KeyEnvelopePayload,
   verifySignedPreKey,
 } from '@parley/shared';
-import { KeyEnvelope, Prisma } from '@prisma/client';
+import { KeyBackup, KeyEnvelope, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { VisibilityService } from '../gateway/visibility.service';
 import { RegisterKeysDto } from './dto/register-keys.dto';
 import { SendEnvelopeDto } from './dto/send-envelope.dto';
+import { PutBackupBlobDto, PutBackupDto } from './dto/put-backup.dto';
 
 /** Obergrenze für Umschläge – eine Sender-Key-Verteilung ist < 2 KiB. */
 const MAX_ENVELOPE_BYTES = 16 * 1024;
@@ -135,6 +137,59 @@ export class KeysService implements OnModuleInit {
   async ackEnvelope(userId: string, envelopeId: string): Promise<void> {
     await this.prisma.keyEnvelope.deleteMany({ where: { id: envelopeId, toUserId: userId } });
   }
+
+  // --- Schlüssel-Backup ------------------------------------------------------
+  // Der Server ist hier reiner Ablageort: Salt, Argon2id-Parameter und zwei
+  // Ciphertexte. Beim Identitäts-Reset (registerKeys) bleibt das Backup
+  // BEWUSST bestehen – es enthält die alte Identität samt History-Schlüsseln;
+  // der nächste Passwort-Login stellt sie daraus wieder her.
+
+  /** Eigenes Backup abrufen (404, wenn noch keins eingerichtet wurde). */
+  async getBackup(userId: string): Promise<KeyBackupRecord> {
+    const backup = await this.prisma.keyBackup.findUnique({ where: { userId } });
+    if (!backup) throw new NotFoundException('Kein Schlüssel-Backup vorhanden');
+    return toBackupRecord(backup);
+  }
+
+  /** Backup einrichten bzw. komplett ersetzen (neuer Master-Key + Blob). */
+  async putBackup(userId: string, dto: PutBackupDto): Promise<void> {
+    const data = {
+      kdfSalt: dto.kdfSalt,
+      kdfOpsLimit: dto.kdfOpsLimit,
+      kdfMemLimit: dto.kdfMemLimit,
+      wrappedKeyNonce: dto.wrappedMasterKey.nonce,
+      wrappedKeyCiphertext: dto.wrappedMasterKey.ciphertext,
+      blobNonce: dto.blob.nonce,
+      blobCiphertext: dto.blob.ciphertext,
+    };
+    await this.prisma.keyBackup.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
+    });
+  }
+
+  /** Laufende Aktualisierung: nur den Zustands-Blob ersetzen. */
+  async putBackupBlob(userId: string, dto: PutBackupBlobDto): Promise<void> {
+    const updated = await this.prisma.keyBackup.updateMany({
+      where: { userId },
+      data: { blobNonce: dto.blob.nonce, blobCiphertext: dto.blob.ciphertext },
+    });
+    if (updated.count === 0) {
+      throw new NotFoundException('Kein Schlüssel-Backup vorhanden – zuerst einrichten');
+    }
+  }
+}
+
+function toBackupRecord(backup: KeyBackup): KeyBackupRecord {
+  return {
+    kdfSalt: backup.kdfSalt,
+    kdfOpsLimit: backup.kdfOpsLimit,
+    kdfMemLimit: backup.kdfMemLimit,
+    wrappedMasterKey: { nonce: backup.wrappedKeyNonce, ciphertext: backup.wrappedKeyCiphertext },
+    blob: { nonce: backup.blobNonce, ciphertext: backup.blobCiphertext },
+    updatedAt: backup.updatedAt.toISOString(),
+  };
 }
 
 function toEnvelopeInfo(envelope: KeyEnvelope): KeyEnvelopeInfo {

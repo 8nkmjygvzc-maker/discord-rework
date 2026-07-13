@@ -36,6 +36,20 @@ export class CryptoDb {
     return this.request<T | undefined>(store, 'readonly', (s) => s.get(key));
   }
 
+  /** Alle Einträge eines Stores als [Schlüssel, Wert]-Paare (fürs Backup). */
+  async entries<T>(store: CryptoStoreName): Promise<[string, T][]> {
+    const [keys, values] = await Promise.all([
+      this.request<IDBValidKey[]>(store, 'readonly', (s) => s.getAllKeys()),
+      this.request<T[]>(store, 'readonly', (s) => s.getAll()),
+    ]);
+    // getAllKeys/getAll liefern dieselbe Reihenfolge (Schlüssel-sortiert).
+    return keys.map((key, i) => [String(key), values[i]]);
+  }
+
+  clear(store: CryptoStoreName): Promise<void> {
+    return this.request(store, 'readwrite', (s) => s.clear()).then(() => undefined);
+  }
+
   put(store: CryptoStoreName, key: string, value: unknown): Promise<void> {
     return this.request(store, 'readwrite', (s) => s.put(value, key)).then(() => undefined);
   }

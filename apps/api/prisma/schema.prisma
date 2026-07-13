@@ -28,6 +28,7 @@ model User {
   memberships     Membership[]
   messages        Message[]
   device          Device?
+  keyBackup       KeyBackup?
   envelopesFrom   KeyEnvelope[]  @relation("EnvelopesFrom")
   envelopesTo     KeyEnvelope[]  @relation("EnvelopesTo")
   friendshipsFrom Friendship[]   @relation("FriendshipsFrom")
@@ -90,6 +91,25 @@ model Device {
   signedPreKeySignature  String
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
+}
+
+// Schlüssel-Backup (nach Phase 15): passwortgeschütztes E2EE-Backup, damit ein
+// Login auf einem neuen Gerät/Browser die History lesen kann. Der Server
+// speichert nur Salt, Argon2id-Parameter und zwei Ciphertexte (umhüllter
+// Master-Key + Zustands-Blob) – ohne das Passwort kann er nichts entschlüsseln.
+model KeyBackup {
+  userId               String   @id
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kdfSalt              String
+  kdfOpsLimit          Int
+  kdfMemLimit          Int
+  wrappedKeyNonce      String
+  wrappedKeyCiphertext String
+  blobNonce            String
+  // Verschlüsselter Client-Zustand (Base64) – Größe im Service gedeckelt.
+  blobCiphertext       String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 // Phase 6: Mailbox für Ende-zu-Ende-verschlüsselte Schlüssel-Umschläge

@@ -11,6 +11,7 @@ import { useMessagesStore } from '../store/messages';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
 import { useDmsStore } from '../store/dms';
+import { useVoiceStore } from '../store/voice';
 import { formatBytes, MAX_FILES_PER_MESSAGE } from '../lib/attachments';
 import { memberRoleColor } from '../lib/roleColors';
 import {
@@ -345,11 +346,42 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const canManageMessages =
     !dm && hasPermission(permissionsFromString(myPermissions), Permissions.ManageMessages);
 
+  // Private Anrufe (nur DM): Roster dieses Kanals + eigener Verbindungsstatus.
+  const callStates = useVoiceStore((s) => (dm ? (s.dmCalls[channel.id] ?? null) : null));
+  const inThisCall = useVoiceStore((s) => s.activeChannelId === channel.id);
+  const joinVoice = useVoiceStore((s) => s.joinVoice);
+  const startCall = (withCamera: boolean) => {
+    void joinVoice(channel, { withCamera });
+  };
+  const activeCall = (callStates?.length ?? 0) > 0;
+
   return (
     <main className="animate-view-in flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
         <span className="text-zinc-500">{dm ? '@' : '#'}</span>
         <span className="font-semibold">{channel.name}</span>
+        {dm && !inThisCall && (
+          <span className="ml-1 flex items-center gap-1">
+            <button
+              type="button"
+              data-testid="call-start"
+              title={`${channel.name} anrufen`}
+              onClick={() => startCall(false)}
+              className="rounded px-1.5 py-0.5 text-sm hover:bg-zinc-700/50"
+            >
+              📞
+            </button>
+            <button
+              type="button"
+              data-testid="call-start-video"
+              title={`Videoanruf mit ${channel.name} starten`}
+              onClick={() => startCall(true)}
+              className="rounded px-1.5 py-0.5 text-sm hover:bg-zinc-700/50"
+            >
+              🎥
+            </button>
+          </span>
+        )}
         <span
           className="ml-auto text-xs text-zinc-500"
           title="Nachrichten und Anhänge werden auf deinem Gerät ver- und entschlüsselt – der Server sieht nur Ciphertext."
@@ -399,6 +431,29 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
         )}
       </header>
 
+      {dm && activeCall && (
+        <div
+          className="flex items-center gap-2 border-b border-emerald-900/60 bg-emerald-950/40 px-4 py-1.5 text-xs text-emerald-300"
+          data-testid="active-call-banner"
+        >
+          <span aria-hidden>📞</span>
+          <span>
+            {inThisCall
+              ? 'Du bist im Anruf'
+              : `Anruf aktiv – ${callStates!.map((v) => v.username).join(', ')}`}
+          </span>
+          {!inThisCall && (
+            <button
+              type="button"
+              data-testid="call-join"
+              onClick={() => startCall(false)}
+              className="ml-auto rounded border border-emerald-700 px-2 py-0.5 font-medium hover:bg-emerald-900/50"
+            >
+              Beitreten
+            </button>
+          )}
+        </div>
+      )}
       {threadRootId && (
         <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900/60 px-4 py-1.5 text-xs text-zinc-400">
           <span aria-hidden>🧵</span>

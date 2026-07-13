@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useDmsStore } from '../store/dms';
 import { useServersStore } from '../store/servers';
 import { useSoundboardStore } from '../store/soundboard';
 import { useVoiceStore } from '../store/voice';
@@ -33,6 +34,10 @@ export default function VoicePanel() {
   const channelName = useServersStore(
     (s) => s.selectedServer?.channels.find((c) => c.id === activeChannelId)?.name,
   );
+  // Privater Anruf (DM): Partnernamen statt Kanalnamen anzeigen.
+  const dmPartner = useDmsStore(
+    (s) => s.channels.find((c) => c.id === activeChannelId)?.otherUser.username,
+  );
 
   if (!activeChannelId && status !== 'error') return null;
 
@@ -53,9 +58,11 @@ export default function VoicePanel() {
           <p
             className={`truncate text-xs font-semibold ${connecting ? 'text-amber-400' : 'text-emerald-400'}`}
           >
-            {connecting ? 'Verbinde …' : 'Sprache verbunden'}
+            {connecting ? 'Verbinde …' : dmPartner ? 'Im Anruf' : 'Sprache verbunden'}
           </p>
-          <p className="truncate text-xs text-zinc-400">🔊 {channelName ?? 'Sprachkanal'}</p>
+          <p className="truncate text-xs text-zinc-400">
+            {dmPartner ? `📞 @${dmPartner}` : `🔊 ${channelName ?? 'Sprachkanal'}`}
+          </p>
         </div>
         <button
           type="button"
@@ -127,18 +134,21 @@ export default function VoicePanel() {
         </button>
       </div>
 
-      <button
-        type="button"
-        disabled={connecting}
-        title="Soundboard öffnen"
-        onClick={() => {
-          if (activeServerId) void loadSoundboard(activeServerId);
-          setSoundboardOpen(true);
-        }}
-        className="mt-2 w-full rounded bg-zinc-800 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        🎶 Soundboard
-      </button>
+      {/* Soundboard ist ein Server-Feature – in privaten Anrufen ausblenden. */}
+      {activeServerId && (
+        <button
+          type="button"
+          disabled={connecting}
+          title="Soundboard öffnen"
+          onClick={() => {
+            void loadSoundboard(activeServerId);
+            setSoundboardOpen(true);
+          }}
+          className="mt-2 w-full rounded bg-zinc-800 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          🎶 Soundboard
+        </button>
+      )}
 
       {/* „X spielt Y“ – auch sichtbar, wenn das Soundboard geschlossen ist. */}
       {nowPlaying && (

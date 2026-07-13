@@ -6,6 +6,7 @@ import AuthPage from './pages/AuthPage';
 import ProfilePage from './pages/ProfilePage';
 import MainPage from './pages/MainPage';
 import NoticeHost from './components/NoticeHost';
+import CallOverlay from './components/CallOverlay';
 
 export default function App() {
   const user = useAuthStore((s) => s.user);
@@ -46,6 +47,8 @@ export default function App() {
       )}
       {/* Globale Hinweise (z. B. gekickt/gebannt) – unabhängig von der Ansicht. */}
       <NoticeHost />
+      {/* Eingehende private Anrufe – ebenfalls ansichtsunabhängig. */}
+      <CallOverlay />
     </>
   );
 }

@@ -78,8 +78,13 @@ export type GatewayEventType =
   // Server-Mitglieder beschränkt statt global.
   | 'PRESENCE_SYNC'
   // Phase 10 – Sprachchat: Beitritt/Verlassen eines Sprachkanals bzw.
-  // Mute-/Deafen-Wechsel (an Server-Mitglieder mit ViewChannels).
+  // Mute-/Deafen-Wechsel (an Server-Mitglieder mit ViewChannels; bei privaten
+  // Anrufen an die beiden DM-Teilnehmer).
   | 'VOICE_STATE_UPDATE'
+  // Private Anrufe (DM): jemand ruft an (nur an den Angerufenen) bzw. der
+  // Angerufene hat abgelehnt (nur an den Anrufer).
+  | 'CALL_RING'
+  | 'CALL_DECLINE'
   // Soundboard: Sound abspielen (NUR an Nutzer, die gerade im Sprachkanal
   // sitzen) bzw. Bibliothek geändert (an Mitglieder mit ViewChannels).
   | 'SOUNDBOARD_PLAY'

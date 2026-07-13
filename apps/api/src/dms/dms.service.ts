@@ -4,8 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Channel, Prisma } from '@prisma/client';
-import { DmChannelInfo, PublicUser } from '@parley/shared';
+import { Channel, Prisma, VoiceSession } from '@prisma/client';
+import { DmChannelInfo, PublicUser, VoiceState } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { VisibilityService } from '../gateway/visibility.service';
@@ -50,8 +50,13 @@ export class DmsService {
     }
 
     const dmKey = [userId, otherId].sort().join(':');
-    const existing = await this.prisma.channel.findUnique({ where: { dmKey } });
-    if (existing) return toDmChannelInfo(existing, toPublicUser(other));
+    const existing = await this.prisma.channel.findUnique({
+      where: { dmKey },
+      include: { voiceSessions: { include: { user: { select: { username: true } } } } },
+    });
+    if (existing) {
+      return toDmChannelInfo(existing, toPublicUser(other), toVoiceStates(existing.voiceSessions));
+    }
 
     let channel: Channel;
     try {
@@ -67,7 +72,7 @@ export class DmsService {
       // Unique-Konflikt: Gegenseite hat den Kanal gerade parallel angelegt.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         const raced = await this.prisma.channel.findUniqueOrThrow({ where: { dmKey } });
-        return toDmChannelInfo(raced, toPublicUser(other));
+        return toDmChannelInfo(raced, toPublicUser(other), []);
       }
       throw err;
     }
@@ -80,15 +85,15 @@ export class DmsService {
     });
     await this.gateway.publishDispatch(
       'DM_CHANNEL_CREATE',
-      { channel: toDmChannelInfo(channel, toPublicUser(other)) },
+      { channel: toDmChannelInfo(channel, toPublicUser(other), []) },
       [userId],
     );
     await this.gateway.publishDispatch(
       'DM_CHANNEL_CREATE',
-      { channel: toDmChannelInfo(channel, toPublicUser(me)) },
+      { channel: toDmChannelInfo(channel, toPublicUser(me), []) },
       [otherId],
     );
-    return toDmChannelInfo(channel, toPublicUser(other));
+    return toDmChannelInfo(channel, toPublicUser(other), []);
   }
 
   async listMine(userId: string): Promise<DmChannelInfo[]> {
@@ -96,7 +101,11 @@ export class DmsService {
       where: { userId },
       include: {
         channel: {
-          include: { dmMembers: { include: { user: { select: publicUserSelect } } } },
+          include: {
+            dmMembers: { include: { user: { select: publicUserSelect } } },
+            // Aktive private Anrufe (Roster-Snapshot wie ServerDetails.voiceStates).
+            voiceSessions: { include: { user: { select: { username: true } } } },
+          },
         },
       },
     });
@@ -104,13 +113,35 @@ export class DmsService {
       .map((m) => {
         const other = m.channel.dmMembers.find((x) => x.userId !== userId);
         // Defensiv: Kanal ohne Gegenseite (sollte nicht vorkommen) überspringen.
-        return other ? toDmChannelInfo(m.channel, toPublicUser(other.user)) : null;
+        return other
+          ? toDmChannelInfo(
+              m.channel,
+              toPublicUser(other.user),
+              toVoiceStates(m.channel.voiceSessions),
+            )
+          : null;
       })
       .filter((c): c is DmChannelInfo => c !== null)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 }
 
-function toDmChannelInfo(channel: Channel, otherUser: PublicUser): DmChannelInfo {
-  return { id: channel.id, otherUser, createdAt: channel.createdAt.toISOString() };
+function toDmChannelInfo(
+  channel: Channel,
+  otherUser: PublicUser,
+  voiceStates: VoiceState[],
+): DmChannelInfo {
+  return { id: channel.id, otherUser, createdAt: channel.createdAt.toISOString(), voiceStates };
+}
+
+function toVoiceStates(sessions: (VoiceSession & { user: { username: string } })[]): VoiceState[] {
+  return sessions.map((s) => ({
+    channelId: s.channelId,
+    userId: s.userId,
+    username: s.user.username,
+    muted: s.muted,
+    deafened: s.deafened,
+    cameraOn: s.cameraOn,
+    screenOn: s.screenOn,
+  }));
 }

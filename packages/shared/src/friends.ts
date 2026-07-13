@@ -1,4 +1,5 @@
 /** Typen für Freundesystem & Direktnachrichten (Phase 7). */
+import type { VoiceState } from './voice';
 
 /** Öffentliche Minimal-Daten eines Nutzers in Freundes-/DM-Kontexten. */
 export interface PublicUser {
@@ -37,6 +38,8 @@ export interface DmChannelInfo {
   id: string;
   otherUser: PublicUser;
   createdAt: string;
+  /** Aktiver privater Anruf in diesem DM-Kanal (Roster wie bei Sprachkanälen). */
+  voiceStates: VoiceState[];
 }
 
 /** Body von POST /api/dms – öffnet (oder findet) den DM-Kanal zu einem Nutzer. */

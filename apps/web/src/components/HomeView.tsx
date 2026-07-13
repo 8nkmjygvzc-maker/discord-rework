@@ -4,11 +4,13 @@ import { useDmsStore } from '../store/dms';
 import { useFriendsStore } from '../store/friends';
 import { useServersStore } from '../store/servers';
 import { usePresenceStore } from '../store/presence';
+import { useVoiceStore } from '../store/voice';
 import Avatar from './Avatar';
 import ChatView from './ChatView';
 import FriendsPanel from './FriendsPanel';
 import UserFooter from './UserFooter';
 import VoicePanel from './VoicePanel';
+import VoiceStage from './VoiceStage';
 import WelcomeView from './WelcomeView';
 
 interface HomeViewProps {
@@ -24,6 +26,7 @@ export default function HomeView({ onOpenProfile, onCreateServer, onJoinServer }
   const selectDm = useDmsStore((s) => s.selectDm);
   const unread = useDmsStore((s) => s.unread);
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
+  const dmCalls = useVoiceStore((s) => s.dmCalls);
 
   // Onboarding (Phase 15): frisches Konto = alle drei Stores geladen und leer
   // (auch Anfragen/Blockierte zählen – wer schon interagiert hat, ist nicht frisch).
@@ -112,6 +115,11 @@ export default function HomeView({ onOpenProfile, onCreateServer, onJoinServer }
                       </span>
                     )}
                   </span>
+                  {(dmCalls[dm.id]?.length ?? 0) > 0 && (
+                    <span title="Anruf aktiv" className="text-emerald-400" aria-hidden>
+                      📞
+                    </span>
+                  )}
                   {(unread[dm.id] ?? 0) > 0 && (
                     <span
                       title={`${unread[dm.id]} ungelesene Nachricht(en)`}
@@ -131,18 +139,22 @@ export default function HomeView({ onOpenProfile, onCreateServer, onJoinServer }
         <UserFooter onOpenProfile={onOpenProfile} />
       </aside>
 
-      {selected ? (
-        <ChatView channel={toDmChannelInfo(selected.id, selected.otherUser.username)} dm />
-      ) : showWelcome ? (
-        <WelcomeView
-          onAddFriends={() => setWelcomeSkipped(true)}
-          onCreateServer={onCreateServer}
-          onJoinServer={onJoinServer}
-          onSkip={() => setWelcomeSkipped(true)}
-        />
-      ) : (
-        <FriendsPanel />
-      )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Video-Bühne privater Anrufe (Kamera/Screen-Share) – wie im Server-Layout. */}
+        <VoiceStage />
+        {selected ? (
+          <ChatView channel={toDmChannelInfo(selected.id, selected.otherUser.username)} dm />
+        ) : showWelcome ? (
+          <WelcomeView
+            onAddFriends={() => setWelcomeSkipped(true)}
+            onCreateServer={onCreateServer}
+            onJoinServer={onJoinServer}
+            onSkip={() => setWelcomeSkipped(true)}
+          />
+        ) : (
+          <FriendsPanel />
+        )}
+      </div>
     </>
   );
 }

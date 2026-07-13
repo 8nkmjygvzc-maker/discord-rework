@@ -19,18 +19,27 @@
  * braucht keinen Lock.
  */
 import {
+  backupKdfDefaults,
   bytesToUtf8,
   createSenderKey,
   cryptoReady,
+  decryptBackupBlob,
   decryptChannelMessage,
+  deriveBackupKek,
   DeviceKeyBundle,
+  encryptBackupBlob,
+  generateBackupMasterKey,
+  generateBackupSalt,
   generateIdentityKeyPair,
   generateSignedPreKey,
   IdentityKeyPair,
+  KeyBackupRecord,
   KeyEnvelopeInfo,
   KeyEnvelopePayload,
   MessageInfo,
   OwnSenderKey,
+  PutKeyBackupBlobRequest,
+  PutKeyBackupRequest,
   ratchetDecrypt,
   ratchetEncrypt,
   ratchetInitAsInitiator,
@@ -42,13 +51,16 @@ import {
   senderKeyDistribution,
   SendMessageRequest,
   SignedPreKeyPair,
+  unwrapBackupMasterKey,
   utf8ToBytes,
+  wrapBackupMasterKey,
   X3dhHeader,
   x3dhInitiate,
   x3dhRespond,
 } from '@parley/shared';
 import { ApiError } from './api';
 import { CryptoDb } from './cryptoDb';
+import { clearLoginSecret, peekLoginSecret } from './loginSecret';
 import { useAuthStore } from '../store/auth';
 
 /** 1:1-Sessions zu einem Gegenüber. `outgoing` = von mir initiiert. */
@@ -78,16 +90,38 @@ interface ReceivedSenderKeyRecord extends ReceivedSenderKey {
   senderId: string;
 }
 
+/**
+ * Serialisierter Krypto-Zustand fürs Schlüssel-Backup (verschlüsselt mit dem
+ * Master-Key beim Server abgelegt). Alle Werte sind reine JSON-Strukturen
+ * (Base64-Strings) – kein Binärformat nötig.
+ */
+interface BackupBlobV1 {
+  v: 1;
+  savedAt: number;
+  identity: IdentityKeyPair;
+  spk: SignedPreKeyPair;
+  sessions: Record<string, PeerSessions>;
+  ownSenderKeys: Record<string, OwnSenderKeyRecord>;
+  recvSenderKeys: Record<string, ReceivedSenderKeyRecord>;
+  /** Rotations-Flags (`rotate:*`) + Verarbeitungs-Log der Umschläge. */
+  kv: Record<string, unknown>;
+}
+
 /** Wie lange ein Bundle-Lookup (auch ein 404) im Speicher gültig bleibt. */
 const BUNDLE_CACHE_MS = 60_000;
 /** Verarbeitete Umschlag-IDs, gegen doppelte Zustellung (Event + Abholung). */
 const PROCESSED_LOG_LIMIT = 500;
+/** Debounce fürs Hochladen des Backup-Blobs nach Zustandsänderungen. */
+const BACKUP_SYNC_DELAY_MS = 3_000;
 
 let db: CryptoDb | null = null;
 let currentUserId: string | null = null;
 let identity: IdentityKeyPair | null = null;
 let signedPreKey: SignedPreKeyPair | null = null;
 let initPromise: Promise<void> | null = null;
+/** Master-Key des Schlüssel-Backups (Base64); null = kein Sync möglich. */
+let backupMasterKey: string | null = null;
+let backupSyncTimer: ReturnType<typeof setTimeout> | null = null;
 const bundleCache = new Map<string, { bundle: DeviceKeyBundle | null; fetchedAt: number }>();
 const keysChangedListeners = new Set<() => void>();
 
@@ -133,6 +167,12 @@ export const e2ee = {
       // noch sein Ergebnis eintragen.
       const openedDb = await CryptoDb.open(userId);
       try {
+        // Schlüssel-Backup: VOR der Schlüsselerzeugung wiederherstellen – nur
+        // so bleibt die Konto-Identität (und damit die History) über Geräte/
+        // Browser hinweg erhalten. Unter dem Web Lock, damit zwei Tabs nicht
+        // parallel restoren/einrichten.
+        const restored = await withLock(() => restoreFromBackup(openedDb, userId));
+
         let id = (await openedDb.get<IdentityKeyPair>('kv', 'identity')) ?? null;
         let spk = (await openedDb.get<SignedPreKeyPair>('kv', 'spk')) ?? null;
         if (!id || !spk) {
@@ -151,6 +191,12 @@ export const e2ee = {
             signedPreKeySignature: spk.signature,
           },
         });
+        // Ohne Backup-Datensatz: jetzt einrichten (der erste Blob enthält die
+        // gerade sichergestellte Identität) – braucht das Login-Passwort.
+        const masterKey = restored.recordExists
+          ? restored.masterKey
+          : await withLock(() => setupBackup(openedDb, userId, restored.masterKey));
+
         if (initPromise !== attempt) {
           // Inzwischen reset()/Nutzerwechsel: Ergebnis verwerfen.
           openedDb.close();
@@ -159,6 +205,9 @@ export const e2ee = {
         db = openedDb;
         identity = id;
         signedPreKey = spk;
+        backupMasterKey = masterKey;
+        // Merge-Ergebnisse bzw. frische Schlüssel zeitnah sichern.
+        scheduleBackupSync();
       } catch (err) {
         openedDb.close();
         throw err;
@@ -175,6 +224,9 @@ export const e2ee = {
 
   /** Bei Logout: Verbindungen kappen, Schlüssel bleiben in IndexedDB erhalten. */
   reset(): void {
+    if (backupSyncTimer) clearTimeout(backupSyncTimer);
+    backupSyncTimer = null;
+    backupMasterKey = null;
     db?.close();
     db = null;
     currentUserId = null;
@@ -212,6 +264,7 @@ export const e2ee = {
   async markServerForRotation(serverId: string): Promise<void> {
     if (!db) return;
     await db.put('kv', `rotate:${serverId}`, Date.now());
+    scheduleBackupSync();
   },
 
   /**
@@ -239,6 +292,7 @@ export const e2ee = {
 
       const { key, message } = encryptChannelMessage(record.key, channelId, plaintext);
       await database.put('ownSenderKeys', channelId, { ...record, key });
+      scheduleBackupSync();
       return { ciphertext: message.ciphertext, nonce: message.nonce, header: message.header };
     });
   },
@@ -265,6 +319,200 @@ export const e2ee = {
     }
   },
 };
+
+// --- Schlüssel-Backup ----------------------------------------------------------
+
+/** GET /api/keys/backup – null, wenn noch keins eingerichtet wurde. */
+async function fetchBackupRecord(): Promise<KeyBackupRecord | null> {
+  try {
+    return await authFetch<KeyBackupRecord>('/api/keys/backup');
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/**
+ * Restore beim Init: Master-Key aus IndexedDB oder (mit dem Login-Passwort)
+ * aus dem Server-Datensatz entpacken, dann den Zustands-Blob importieren.
+ * Verändert nur die IndexedDB – die Modul-Globals setzt der Aufrufer.
+ */
+async function restoreFromBackup(
+  database: CryptoDb,
+  userId: string,
+): Promise<{ recordExists: boolean; masterKey: string | null }> {
+  const record = await fetchBackupRecord();
+  let masterKey = (await database.get<string>('kv', 'backupKey')) ?? null;
+  if (!record) return { recordExists: false, masterKey };
+
+  if (!masterKey) {
+    const password = peekLoginSecret();
+    if (!password) {
+      // Session-Restore ohne Passwort (z. B. nach Reload mit geleerter DB):
+      // kein Sync möglich – der nächste echte Login holt das Backup nach.
+      console.info('Schlüssel-Backup vorhanden, aber ohne Login-Passwort nicht entsperrbar.');
+      return { recordExists: true, masterKey: null };
+    }
+    try {
+      // Argon2id ist bewusst teuer (~1 s) – läuft nur einmal pro Gerät.
+      const kek = deriveBackupKek(password, record.kdfSalt, record.kdfOpsLimit, record.kdfMemLimit);
+      masterKey = unwrapBackupMasterKey(record.wrappedMasterKey, kek);
+      await database.put('kv', 'backupKey', masterKey);
+      clearLoginSecret();
+    } catch {
+      console.warn('Schlüssel-Backup: Master-Key nicht entpackbar (beschädigter Datensatz?).');
+      return { recordExists: true, masterKey: null };
+    }
+  }
+
+  try {
+    const json = decryptBackupBlob(masterKey, record.blob, userId);
+    await importBackupBlob(database, JSON.parse(json) as BackupBlobV1);
+  } catch (err) {
+    console.warn('Schlüssel-Backup: Zustands-Blob nicht importierbar:', err);
+  }
+  return { recordExists: true, masterKey };
+}
+
+/**
+ * Erstes Einrichten (bzw. Neuanlegen nach Server-Reset): zufälliger Master-Key,
+ * mit dem passwortabgeleiteten KEK umhüllt, plus aktueller Zustands-Blob.
+ * Liefert null, wenn gerade kein Passwort verfügbar ist (reiner Session-Restore).
+ */
+async function setupBackup(
+  database: CryptoDb,
+  userId: string,
+  existingMasterKey: string | null,
+): Promise<string | null> {
+  const password = peekLoginSecret();
+  if (!password) return existingMasterKey;
+
+  const masterKey = existingMasterKey ?? generateBackupMasterKey();
+  const salt = generateBackupSalt();
+  const { opsLimit, memLimit } = backupKdfDefaults();
+  const kek = deriveBackupKek(password, salt, opsLimit, memLimit);
+  const blob = await exportBackupBlob(database);
+  const body: PutKeyBackupRequest = {
+    kdfSalt: salt,
+    kdfOpsLimit: opsLimit,
+    kdfMemLimit: memLimit,
+    wrappedMasterKey: wrapBackupMasterKey(masterKey, kek),
+    blob: encryptBackupBlob(masterKey, JSON.stringify(blob), userId),
+  };
+  await authFetch<void>('/api/keys/backup', { method: 'PUT', body });
+  await database.put('kv', 'backupKey', masterKey);
+  await database.put('kv', 'backupSavedAt', blob.savedAt);
+  clearLoginSecret();
+  return masterKey;
+}
+
+/** Kompletten Krypto-Zustand aus der IndexedDB serialisieren. */
+async function exportBackupBlob(database: CryptoDb): Promise<BackupBlobV1> {
+  const [id, spk, sessions, ownSenderKeys, recvSenderKeys, kvEntries] = await Promise.all([
+    database.get<IdentityKeyPair>('kv', 'identity'),
+    database.get<SignedPreKeyPair>('kv', 'spk'),
+    database.entries<PeerSessions>('sessions'),
+    database.entries<OwnSenderKeyRecord>('ownSenderKeys'),
+    database.entries<ReceivedSenderKeyRecord>('recvSenderKeys'),
+    database.entries<unknown>('kv'),
+  ]);
+  if (!id || !spk) throw new Error('Kein Schlüsselmaterial zum Sichern vorhanden');
+  return {
+    v: 1,
+    savedAt: Date.now(),
+    identity: id,
+    spk,
+    sessions: Object.fromEntries(sessions),
+    ownSenderKeys: Object.fromEntries(ownSenderKeys),
+    recvSenderKeys: Object.fromEntries(recvSenderKeys),
+    // Nur fachlicher Zustand – NIE der Master-Key selbst oder Sync-Metadaten.
+    kv: Object.fromEntries(
+      kvEntries.filter(([key]) => key.startsWith('rotate:') || key === 'processedEnvelopes'),
+    ),
+  };
+}
+
+/**
+ * Backup-Blob in die lokale IndexedDB einspielen. Merge-Regeln:
+ *  - Andere Identität im Blob → Backup gewinnt (es IST die Konto-Identität);
+ *    lokale 1:1-Sessions gehören zur verworfenen Identität und fliegen raus.
+ *  - recvSenderKeys: IMMER der früheste Kettenstand (kleinste Iteration) –
+ *    damit bleibt maximal viel History entschlüsselbar.
+ *  - sessions/ownSenderKeys: bei gleicher Identität gewinnt der jüngere Stand
+ *    (Blob nur, wenn er nach unserem letzten Sync gespeichert wurde).
+ */
+async function importBackupBlob(database: CryptoDb, blob: BackupBlobV1): Promise<void> {
+  if (blob.v !== 1 || !blob.identity?.signPublicKey || !blob.spk?.publicKey) {
+    throw new Error('Unbekanntes Backup-Format');
+  }
+  const localId = (await database.get<IdentityKeyPair>('kv', 'identity')) ?? null;
+  const sameIdentity = localId?.signPublicKey === blob.identity.signPublicKey;
+  const lastSynced = (await database.get<number>('kv', 'backupSavedAt')) ?? 0;
+  const blobWins = !sameIdentity || blob.savedAt > lastSynced;
+
+  if (!sameIdentity) {
+    await database.put('kv', 'identity', blob.identity);
+    await database.put('kv', 'spk', blob.spk);
+    await database.clear('sessions');
+  }
+  for (const [peerId, sessions] of Object.entries(blob.sessions ?? {})) {
+    if (blobWins || !(await database.get('sessions', peerId))) {
+      await database.put('sessions', peerId, sessions);
+    }
+  }
+  for (const [channelId, record] of Object.entries(blob.ownSenderKeys ?? {})) {
+    if (blobWins || !(await database.get('ownSenderKeys', channelId))) {
+      await database.put('ownSenderKeys', channelId, record);
+    }
+  }
+  for (const [key, received] of Object.entries(blob.recvSenderKeys ?? {})) {
+    const existing = await database.get<ReceivedSenderKeyRecord>('recvSenderKeys', key);
+    if (!existing || existing.iteration > received.iteration) {
+      await database.put('recvSenderKeys', key, received);
+    }
+  }
+  for (const [key, value] of Object.entries(blob.kv ?? {})) {
+    if (key === 'processedEnvelopes') {
+      const local = (await database.get<string[]>('kv', key)) ?? [];
+      const merged = [...new Set([...(value as string[]), ...local])];
+      await database.put('kv', key, merged.slice(-PROCESSED_LOG_LIMIT));
+    } else if (key.startsWith('rotate:')) {
+      const local = (await database.get<number>('kv', key)) ?? 0;
+      await database.put('kv', key, Math.max(local, value as number));
+    }
+  }
+  await database.put('kv', 'backupSavedAt', blob.savedAt);
+}
+
+/**
+ * Debounced Sync: nach jeder Zustandsänderung (Umschlag verarbeitet, Sender-Key
+ * erzeugt/rotiert, Session fortgeschrieben) den Blob neu verschlüsselt hochladen.
+ */
+function scheduleBackupSync(): void {
+  if (!backupMasterKey || !db) return;
+  if (backupSyncTimer) clearTimeout(backupSyncTimer);
+  backupSyncTimer = setTimeout(() => {
+    backupSyncTimer = null;
+    void runBackupSync().catch((err: unknown) =>
+      console.warn('Schlüssel-Backup-Sync fehlgeschlagen:', err),
+    );
+  }, BACKUP_SYNC_DELAY_MS);
+}
+
+async function runBackupSync(): Promise<void> {
+  const database = db;
+  const masterKey = backupMasterKey;
+  const userId = currentUserId;
+  if (!database || !masterKey || !userId) return;
+  await withLock(async () => {
+    const blob = await exportBackupBlob(database);
+    const body: PutKeyBackupBlobRequest = {
+      blob: encryptBackupBlob(masterKey, JSON.stringify(blob), userId),
+    };
+    await authFetch<void>('/api/keys/backup/blob', { method: 'PUT', body });
+    await database.put('kv', 'backupSavedAt', blob.savedAt);
+  });
+}
 
 // --- interne Helfer -----------------------------------------------------------
 
@@ -434,5 +682,7 @@ async function processEnvelope(envelope: KeyEnvelopeInfo): Promise<void> {
     processed.push(envelope.id);
     await database.put('kv', 'processedEnvelopes', processed.slice(-PROCESSED_LOG_LIMIT));
     await authFetch<void>(`/api/envelopes/${envelope.id}`, { method: 'DELETE' });
+    // Neuer Sender-Key/Session-Fortschritt → ins Backup übernehmen.
+    scheduleBackupSync();
   });
 }

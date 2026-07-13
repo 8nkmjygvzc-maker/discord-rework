@@ -1,4 +1,6 @@
 import type {
+  CallDeclinePayload,
+  CallRingPayload,
   DmChannelInfo,
   KeyEnvelopeInfo,
   MessageCreatePayload,
@@ -66,6 +68,12 @@ const client = new GatewayClient({
         return;
       case 'VOICE_STATE_UPDATE':
         useVoiceStore.getState().handleVoiceStateUpdate(d as VoiceStateUpdatePayload);
+        return;
+      case 'CALL_RING':
+        useVoiceStore.getState().handleCallRing(d as CallRingPayload);
+        return;
+      case 'CALL_DECLINE':
+        useVoiceStore.getState().handleCallDecline(d as CallDeclinePayload);
         return;
       case 'SOUNDBOARD_PLAY':
         useSoundboardStore.getState().handleSoundboardPlay(d as SoundboardPlayPayload);

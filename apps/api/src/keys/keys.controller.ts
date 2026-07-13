@@ -11,13 +11,14 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import type { DeviceKeyBundle, KeyEnvelopeInfo } from '@parley/shared';
+import type { DeviceKeyBundle, KeyBackupRecord, KeyEnvelopeInfo } from '@parley/shared';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard';
 import type { AccessTokenPayload } from '../auth/auth.service';
 import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { KeysService } from './keys.service';
 import { RegisterKeysDto } from './dto/register-keys.dto';
 import { SendEnvelopeDto } from './dto/send-envelope.dto';
+import { PutBackupBlobDto, PutBackupDto } from './dto/put-backup.dto';
 
 @Controller()
 @UseGuards(AuthGuard, RateLimitGuard)
@@ -30,6 +31,31 @@ export class KeysController {
   @RateLimit({ limit: 10, windowS: 60 })
   register(@CurrentUser() user: AccessTokenPayload, @Body() dto: RegisterKeysDto): Promise<void> {
     return this.keys.registerKeys(user.sub, dto);
+  }
+
+  /** Eigenes Schlüssel-Backup abrufen (Restore beim Login auf neuem Gerät). */
+  @Get('keys/backup')
+  getBackup(@CurrentUser() user: AccessTokenPayload): Promise<KeyBackupRecord> {
+    return this.keys.getBackup(user.sub);
+  }
+
+  /** Backup einrichten bzw. ersetzen (Salt + umhüllter Master-Key + Blob). */
+  @Put('keys/backup')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RateLimit({ limit: 10, windowS: 60 })
+  putBackup(@CurrentUser() user: AccessTokenPayload, @Body() dto: PutBackupDto): Promise<void> {
+    return this.keys.putBackup(user.sub, dto);
+  }
+
+  /** Zustands-Blob aktualisieren (debounced Sync des Clients). */
+  @Put('keys/backup/blob')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RateLimit({ limit: 60, windowS: 60 })
+  putBackupBlob(
+    @CurrentUser() user: AccessTokenPayload,
+    @Body() dto: PutBackupBlobDto,
+  ): Promise<void> {
+    return this.keys.putBackupBlob(user.sub, dto);
   }
 
   /** Schlüsselbündel eines Nutzers für X3DH (nur öffentliche Schlüssel). */

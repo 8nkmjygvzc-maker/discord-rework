@@ -2,8 +2,11 @@
  * Zentraler libsodium-Zugriff. libsodium initialisiert sich asynchron (WASM);
  * alle Krypto-Funktionen dieses Pakets setzen voraus, dass `cryptoReady()`
  * einmal abgewartet wurde – danach sind sie synchron nutzbar.
+ *
+ * Sumo-Variante: das Schlüssel-Backup braucht `crypto_pwhash` (Argon2id für
+ * die Passwort-Ableitung), das in der Standard-Variante fehlt.
  */
-import _sodium from 'libsodium-wrappers';
+import _sodium from 'libsodium-wrappers-sumo';
 
 let ready = false;
 
