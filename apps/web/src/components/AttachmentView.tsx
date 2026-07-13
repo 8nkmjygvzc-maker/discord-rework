@@ -128,7 +128,10 @@ function ThumbnailButton({ meta, onClick }: { meta: AttachmentMeta; onClick: () 
 
 /**
  * Große Bild-Vorschau (Lightbox): entschlüsselt das ORIGINAL (nicht nur das
- * Thumbnail) und zeigt es bildschirmfüllend. Klick daneben oder Esc schließt;
+ * Thumbnail) und zeigt es bildschirmfüllend – wie in Discord wird das Bild bis
+ * zum Viewport HOCHskaliert (auch kleine Bilder werden groß), statt bei der
+ * natürlichen Größe zu stoppen. Klick aufs Bild schaltet auf echte
+ * Originalgröße (scrollbar) und zurück; Klick daneben oder Esc schließt,
  * Speichern startet den Download wie bisher.
  */
 function ImageLightbox({
@@ -144,6 +147,8 @@ function ImageLightbox({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  // false = an den Bildschirm angepasst (hochskaliert), true = echte Pixelgröße.
+  const [actualSize, setActualSize] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -191,15 +196,31 @@ function ImageLightbox({
           ✕
         </button>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center">
+      <div
+        className={`flex min-h-0 flex-1 justify-center ${
+          actualSize ? 'items-start overflow-auto' : 'items-center'
+        }`}
+        onClick={onClose}
+      >
         {failed ? (
           <p className="text-sm text-zinc-400">Bild konnte nicht geladen werden.</p>
         ) : url ? (
           <img
             src={url}
             alt={meta.name}
-            onClick={(e) => e.stopPropagation()}
-            className="animate-pop-in max-h-full max-w-full rounded object-contain"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActualSize((v) => !v);
+            }}
+            // Angepasst (h-full w-full + object-contain): das Bild füllt die ganze
+            // Fläche und wird dabei hoch- ODER runterskaliert – so wird auch ein
+            // kleines Bild groß, wie in Discord. Echte Größe: natürliche Pixelmaße,
+            // Container scrollt dann (overflow-auto oben).
+            className={
+              actualSize
+                ? 'animate-pop-in m-auto max-w-none cursor-zoom-out rounded'
+                : 'animate-pop-in h-full w-full cursor-zoom-in rounded object-contain'
+            }
           />
         ) : (
           <p className="animate-pulse text-sm text-zinc-400">Wird entschlüsselt …</p>
