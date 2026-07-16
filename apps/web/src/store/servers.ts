@@ -97,10 +97,9 @@ export const useServersStore = create<ServersState>()((set, get) => ({
     const details = await authFetch<ServerDetails>(`/api/servers/${serverId}`);
     set((s) => ({
       selectedServer: details,
-      // Textkanal-Auswahl behalten, wenn er noch existiert, sonst erster Textkanal.
-      selectedChannelId: details.channels.some(
-        (c) => c.id === s.selectedChannelId && c.type === 'TEXT',
-      )
+      // Kanal-Auswahl behalten, wenn er noch existiert (Text ODER Voice –
+      // Sprachkanäle haben eine eigene Großansicht), sonst erster Textkanal.
+      selectedChannelId: details.channels.some((c) => c.id === s.selectedChannelId)
         ? s.selectedChannelId
         : (details.channels.find((c) => c.type === 'TEXT')?.id ?? null),
     }));

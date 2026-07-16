@@ -70,6 +70,8 @@ interface VoiceStoreState {
   toggleDeafen: () => void;
   toggleCamera: () => Promise<void>;
   toggleScreenShare: () => Promise<void>;
+  /** Nach Mikrofon-Wechsel in den Einstellungen: Gerät live umschalten. */
+  applyMicDevice: () => Promise<void>;
   /** Vom VoiceClient bei unerwartetem Verbindungsende aufgerufen. */
   handleVoiceClosed: () => void;
   /** Nach Gateway-Reconnect: Session serverseitig neu registrieren. */
@@ -356,6 +358,16 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
       void get().syncState();
     } catch {
       // Nutzer hat den Freigabe-Dialog abgebrochen o. Ä. – kein Fehler-Banner.
+    }
+  },
+
+  applyMicDevice: async () => {
+    if (!client || get().status !== 'connected') return;
+    try {
+      const hasMic = await client.restartMic(get().selfMuted);
+      set({ hasMic });
+    } catch {
+      /* Altes Gerät läuft weiter – kein Fehler-Banner nötig. */
     }
   },
 

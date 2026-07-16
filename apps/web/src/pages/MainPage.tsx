@@ -7,6 +7,7 @@ import ChannelSidebar from '../components/ChannelSidebar';
 import MembersPanel from '../components/MembersPanel';
 import ChatView from '../components/ChatView';
 import VoiceStage from '../components/VoiceStage';
+import VoiceChannelView from '../components/VoiceChannelView';
 import HomeView from '../components/HomeView';
 import RolesDialog from '../components/RolesDialog';
 import InviteDialog from '../components/InviteDialog';
@@ -91,13 +92,21 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
             />
 
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <VoiceStage />
-              {channel ? (
-                <ChatView channel={channel} />
+              {/* Sprachkanal ausgewählt → Großansicht (inkl. eigener Video-
+                  Bühne) statt Textchat; sonst wie gehabt Video-Leiste + Chat. */}
+              {channel?.type === 'VOICE' ? (
+                <VoiceChannelView channel={channel} />
               ) : (
-                <main className="flex flex-1 items-center justify-center text-zinc-500">
-                  Wähle einen Kanal
-                </main>
+                <>
+                  <VoiceStage />
+                  {channel ? (
+                    <ChatView channel={channel} />
+                  ) : (
+                    <main className="flex flex-1 items-center justify-center text-zinc-500">
+                      Wähle einen Kanal
+                    </main>
+                  )}
+                </>
               )}
             </div>
 

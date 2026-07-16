@@ -1,6 +1,6 @@
 import { Device, types } from 'mediasoup-client';
 import type { VoiceProducerInfo, VoiceServerMessage, VoiceSource } from '@parley/shared';
-import { MIC_GATE_OFF_DB, useSettingsStore } from '../store/settings';
+import { MIC_GATE_OFF_DB, getMicStream, useSettingsStore } from '../store/settings';
 
 /**
  * Browser-seitige Voice-Anbindung (Phase 10/11). Kapselt die mediasoup-client-
@@ -211,6 +211,57 @@ export class VoiceClient {
     }
   }
 
+  /**
+   * Mikrofon auf das in den Einstellungen gewählte Eingabegerät umschalten –
+   * live während der Verbindung. Der bestehende Producer bekommt den neuen
+   * Track per `replaceTrack` (kein neues Signaling, Pausenzustand bleibt);
+   * im Zuhörer-Modus (bisher kein Mikrofon) wird ein kompletter Neustart
+   * versucht – mit dem neuen Gerät klappt es jetzt vielleicht.
+   * `paused` = aktueller Mute-Zustand. Liefert, ob danach ein Mikrofon läuft.
+   */
+  async restartMic(paused: boolean): Promise<boolean> {
+    if (this.closed || !this.sendTransport) return this.hasMic;
+    if (!this.micProducer) {
+      await this.startMic();
+      if (this.micProducer && paused) await this.setMicPaused(true);
+      return this.hasMic;
+    }
+    // Erst das neue Gerät beschaffen – schlägt das fehl, läuft das alte weiter.
+    let raw: MediaStreamTrack | undefined;
+    try {
+      raw = (await getMicStream()).getAudioTracks()[0];
+    } catch {
+      /* raw bleibt undefined → unten unverändert zurück */
+    }
+    if (!raw) return true;
+
+    // Alten Pfad merken (Gate/Tracks/Sprech-Erkennung), neuen aufbauen und erst
+    // NACH dem erfolgreichen Track-Tausch abbauen – kein Aussetzer beim Wechsel.
+    const oldGate = this.micGate;
+    this.micGate = null;
+    const oldTrack = this.micTrack;
+    const oldRaw = this.micRawTrack;
+    this.micRawTrack = raw;
+    this.micTrack = (await this.createMicGate(raw)) ?? raw;
+    await this.micProducer.replaceTrack({ track: this.micTrack });
+
+    const oldDetector = this.speakingDetectors.get('self');
+    if (oldDetector) {
+      oldDetector.stop();
+      this.speakingDetectors.delete('self');
+    }
+    if (oldGate) {
+      window.clearInterval(oldGate.timer);
+      oldGate.source.disconnect();
+    }
+    if (oldTrack !== oldRaw) oldTrack?.stop();
+    oldRaw?.stop();
+
+    this.attachSpeaking('self', this.micTrack, this.cb.self.userId);
+    this.speakingDetectors.get('self')?.setEnabled(!paused);
+    return true;
+  }
+
   /** Deafen: alle eingehenden Audio-Ströme stummschalten (lokal). */
   setDeafened(deafened: boolean): void {
     this.deafened = deafened;
@@ -330,9 +381,7 @@ export class VoiceClient {
 
   private async startMic(): Promise<void> {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      const stream = await getMicStream();
       this.micRawTrack = stream.getAudioTracks()[0] ?? null;
       if (this.micRawTrack && this.sendTransport) {
         // Durchs Noise-Gate schleifen (Empfindlichkeit aus den Einstellungen);

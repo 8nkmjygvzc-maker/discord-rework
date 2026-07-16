@@ -285,6 +285,8 @@ function DeleteX({ onClick }: { onClick: () => void }) {
 function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDelete: boolean }) {
   const user = useAuthStore((s) => s.user);
   const deleteChannel = useServersStore((s) => s.deleteChannel);
+  const selectedChannelId = useServersStore((s) => s.selectedChannelId);
+  const selectChannel = useServersStore((s) => s.selectChannel);
   const activeChannelId = useVoiceStore((s) => s.activeChannelId);
   const status = useVoiceStore((s) => s.status);
   const joinVoice = useVoiceStore((s) => s.joinVoice);
@@ -296,15 +298,24 @@ function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDele
 
   const participants = voiceStates.filter((v) => v.channelId === channel.id);
   const isActive = activeChannelId === channel.id;
+  const isSelected = channel.id === selectedChannelId;
   const connecting = isActive && status === 'connecting';
 
   return (
     <li className="group">
       <button
         type="button"
-        onClick={() => void joinVoice(channel)}
+        // Klick öffnet die Großansicht des Kanals im Hauptbereich UND tritt bei.
+        onClick={() => {
+          selectChannel(channel.id);
+          void joinVoice(channel);
+        }}
         className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm ${
-          isActive ? 'text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+          isSelected
+            ? 'bg-zinc-700/60 text-zinc-100'
+            : isActive
+              ? 'text-zinc-100 hover:bg-zinc-800'
+              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
         }`}
       >
         <span className="text-zinc-500">🔊</span>
