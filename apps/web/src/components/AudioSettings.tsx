@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
-import { MIC_GATE_OFF_DB, useSettingsStore } from '../store/settings';
+import { useCallback, useEffect, useState } from 'react';
+import { MIC_GATE_OFF_DB, micAudioConstraints, useSettingsStore } from '../store/settings';
+import { useVoiceStore } from '../store/voice';
 
 /**
- * „Sprache & Audio“-Einstellungen (Profilseite, Feinschliff): Mikrofon-
- * Empfindlichkeit (Noise-Gate-Schwelle) mit Live-Mikrofontest sowie die lokale
- * Soundboard-Lautstärke. Beide Werte liegen im Settings-Store (localStorage)
- * und wirken sofort – auch während einer laufenden Sprachverbindung.
+ * „Sprache & Audio“-Einstellungen (Profilseite, Feinschliff): Mikrofon-Auswahl
+ * (Eingabegerät), Mikrofon-Empfindlichkeit (Noise-Gate-Schwelle) mit Live-
+ * Mikrofontest sowie die lokale Soundboard-Lautstärke. Alle Werte liegen im
+ * Settings-Store (localStorage) und wirken sofort – auch während einer
+ * laufenden Sprachverbindung.
  */
 
 /** dBFS (−100…0) → Prozentposition auf Pegelanzeige/Slider-Skala. */
@@ -18,13 +20,43 @@ export default function AudioSettings() {
   const setMicThresholdDb = useSettingsStore((s) => s.setMicThresholdDb);
   const soundboardVolume = useSettingsStore((s) => s.soundboardVolume);
   const setSoundboardVolume = useSettingsStore((s) => s.setSoundboardVolume);
+  const micDeviceId = useSettingsStore((s) => s.micDeviceId);
+  const setMicDeviceId = useSettingsStore((s) => s.setMicDeviceId);
 
   const [testing, setTesting] = useState(false);
   const [levelDb, setLevelDb] = useState<number>(MIC_GATE_OFF_DB);
   const [micError, setMicError] = useState<string | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  /** true = Browser gibt die Gerätenamen erst nach einer Mikrofon-Freigabe her. */
+  const [labelsLocked, setLabelsLocked] = useState(false);
+
+  const loadDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      // Ohne erteilte Berechtigung liefert der Browser leere deviceIds/Labels –
+      // solche Platzhalter-Einträge sind nicht auswählbar und fliegen raus.
+      const inputs = all.filter((d) => d.kind === 'audioinput' && d.deviceId !== '');
+      setDevices(inputs);
+      setLabelsLocked(inputs.length === 0 || inputs.every((d) => !d.label));
+    } catch {
+      /* Geräteliste nicht verfügbar → Auswahl bleibt bei „Standard“. */
+    }
+  }, []);
+
+  // Geräteliste laden und bei An-/Abstecken (devicechange) aktualisieren.
+  useEffect(() => {
+    void loadDevices();
+    const md = navigator.mediaDevices;
+    if (!md?.addEventListener) return;
+    const onChange = (): void => void loadDevices();
+    md.addEventListener('devicechange', onChange);
+    return () => md.removeEventListener('devicechange', onChange);
+  }, [loadDevices]);
 
   // Mikrofontest: Pegel per WebAudio messen (gleiche RMS→dBFS-Rechnung wie das
   // Noise-Gate in lib/voice.ts, damit die Anzeige zur Übertragung passt).
+  // Hängt vom gewählten Gerät ab – ein Wechsel startet den Test darauf neu.
   useEffect(() => {
     if (!testing) return;
     let cancelled = false;
@@ -34,9 +66,9 @@ export default function AudioSettings() {
 
     void (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
+        // Die Freigabe schaltet auch die Gerätenamen frei → Liste auffrischen.
+        void loadDevices();
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -69,7 +101,19 @@ export default function AudioSettings() {
       if (ctx) void ctx.close().catch(() => undefined);
       setLevelDb(MIC_GATE_OFF_DB);
     };
-  }, [testing]);
+  }, [testing, micDeviceId, loadDevices]);
+
+  /** Kurze getUserMedia-Freigabe, nur um die Gerätenamen freizuschalten. */
+  async function unlockDeviceLabels(): Promise<void> {
+    setMicError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      await loadDevices();
+    } catch {
+      setMicError('Mikrofon nicht verfügbar oder Zugriff verweigert.');
+    }
+  }
 
   const gateOff = micThresholdDb <= MIC_GATE_OFF_DB;
   // Würde bei diesem Pegel übertragen werden? (steuert die Farbe der Anzeige)
@@ -78,6 +122,48 @@ export default function AudioSettings() {
   return (
     <div className="mt-6 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
       <h2 className="text-sm font-semibold text-zinc-300">Sprache &amp; Audio</h2>
+
+      {/* Mikrofon-Auswahl (Eingabegerät) */}
+      <label className="mt-3 block text-xs text-zinc-400">
+        <span>Eingabegerät</span>
+        <select
+          value={micDeviceId ?? ''}
+          onChange={(e) => {
+            setMicDeviceId(e.target.value || null);
+            // Läuft gerade eine Sprachverbindung, sofort umschalten.
+            void useVoiceStore.getState().applyMicDevice();
+          }}
+          className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200"
+          data-testid="mic-device"
+        >
+          <option value="">Standard (Systemeinstellung)</option>
+          {micDeviceId !== null && !devices.some((d) => d.deviceId === micDeviceId) && (
+            <option value={micDeviceId}>Gespeichertes Gerät (nicht gefunden)</option>
+          )}
+          {devices.map((d, i) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || `Mikrofon ${i + 1}`}
+            </option>
+          ))}
+        </select>
+      </label>
+      {labelsLocked ? (
+        <p className="mt-1 text-xs text-zinc-500">
+          Der Browser zeigt die Gerätenamen erst nach einer Mikrofon-Freigabe.{' '}
+          <button
+            type="button"
+            onClick={() => void unlockDeviceLabels()}
+            className="text-indigo-400 hover:text-indigo-300 hover:underline"
+          >
+            Jetzt freigeben
+          </button>
+        </p>
+      ) : (
+        <p className="mt-1 text-xs text-zinc-500">
+          Wirkt sofort – auch während einer laufenden Sprachverbindung. Ist das Gerät nicht
+          angeschlossen, wird das Standardgerät benutzt.
+        </p>
+      )}
 
       {/* Mikrofon-Empfindlichkeit (Noise-Gate-Schwelle) */}
       <label className="mt-3 block text-xs text-zinc-400">
