@@ -1,6 +1,6 @@
 import { Device, types } from 'mediasoup-client';
 import type { VoiceProducerInfo, VoiceServerMessage, VoiceSource } from '@parley/shared';
-import { MIC_GATE_OFF_DB, micAudioConstraints, useSettingsStore } from '../store/settings';
+import { MIC_GATE_OFF_DB, getMicStream, useSettingsStore } from '../store/settings';
 
 /**
  * Browser-seitige Voice-Anbindung (Phase 10/11). Kapselt die mediasoup-client-
@@ -229,8 +229,7 @@ export class VoiceClient {
     // Erst das neue Gerät beschaffen – schlägt das fehl, läuft das alte weiter.
     let raw: MediaStreamTrack | undefined;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
-      raw = stream.getAudioTracks()[0];
+      raw = (await getMicStream()).getAudioTracks()[0];
     } catch {
       /* raw bleibt undefined → unten unverändert zurück */
     }
@@ -382,7 +381,7 @@ export class VoiceClient {
 
   private async startMic(): Promise<void> {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
+      const stream = await getMicStream();
       this.micRawTrack = stream.getAudioTracks()[0] ?? null;
       if (this.micRawTrack && this.sendTransport) {
         // Durchs Noise-Gate schleifen (Empfindlichkeit aus den Einstellungen);

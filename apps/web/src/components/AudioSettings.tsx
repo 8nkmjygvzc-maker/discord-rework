@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { MIC_GATE_OFF_DB, micAudioConstraints, useSettingsStore } from '../store/settings';
+import { MIC_GATE_OFF_DB, getMicStream, useSettingsStore } from '../store/settings';
 import { useVoiceStore } from '../store/voice';
 
 /**
@@ -66,7 +66,7 @@ export default function AudioSettings() {
 
     void (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
+        stream = await getMicStream();
         // Die Freigabe schaltet auch die Gerätenamen frei → Liste auffrischen.
         void loadDevices();
         if (cancelled) {

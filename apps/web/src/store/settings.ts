@@ -43,19 +43,30 @@ export const useSettingsStore = create<SettingsState>()(
 );
 
 /**
- * getUserMedia-Constraints fürs Mikrofon: Standard-Verarbeitung plus das
- * gewählte Eingabegerät. Bewusst `ideal` statt `exact`, damit der Browser auf
- * das Standardgerät zurückfällt, wenn das gespeicherte Gerät nicht mehr
- * existiert (z. B. Headset abgezogen) – statt komplett zu scheitern.
+ * Mikrofon-Stream mit dem gewählten Eingabegerät öffnen. `exact` erzwingt das
+ * Gerät – ein weiches `ideal` reicht nicht: Läuft bereits eine Aufnahme
+ * (Gerätewechsel während einer Verbindung), darf der Browser sonst bei der
+ * schon offenen Standard-Quelle bleiben statt umzuschalten. Ist das
+ * gespeicherte Gerät nicht (mehr) öffenbar (abgezogen/belegt), fällt der
+ * zweite Versuch aufs Systemstandard-Gerät zurück.
  * Liegt hier statt in lib/voice.ts, damit AudioSettings sie nutzen kann, ohne
  * mediasoup-client in den Haupt-Bundle zu ziehen (Code-Splitting, Phase 15).
  */
-export function micAudioConstraints(): MediaTrackConstraints {
+export async function getMicStream(): Promise<MediaStream> {
   const { micDeviceId } = useSettingsStore.getState();
-  return {
+  const base: MediaTrackConstraints = {
     echoCancellation: true,
     noiseSuppression: true,
     autoGainControl: true,
-    ...(micDeviceId ? { deviceId: { ideal: micDeviceId } } : {}),
   };
+  if (micDeviceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { ...base, deviceId: { exact: micDeviceId } },
+      });
+    } catch {
+      /* Gewähltes Gerät nicht verfügbar → Standardgerät versuchen. */
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: base });
 }
