@@ -32,9 +32,54 @@ export class UnfurlService {
 
   /** Holt die Vorschau oder null (unerreichbar/kein HTML/nichts Brauchbares). */
   async unfurl(rawUrl: string): Promise<LinkEmbed | null> {
+    // Bekannte Medien-Provider zuerst über ihr offizielles oEmbed-JSON:
+    // deren HTML-Seiten sind riesig (YouTubes og:title liegt HINTER dem
+    // 512-KiB-Lese-Limit), das oEmbed ist klein und stabil.
+    const viaOembed = await this.tryOembed(rawUrl);
+    if (viaOembed) return viaOembed;
     const fetched = await this.safeFetch(rawUrl);
     if (!fetched) return null;
     return this.parseEmbed(fetched.finalUrl, fetched.html);
+  }
+
+  /**
+   * oEmbed-Abruf für YouTube/Spotify. Kein SSRF-Risiko: Der Endpunkt-Host ist
+   * fest verdrahtet, die Nutzer-URL wandert nur URL-kodiert als Query-Parameter
+   * hinein. Schlägt der Abruf fehl, greift das generische Scraping als Fallback.
+   */
+  private async tryOembed(rawUrl: string): Promise<LinkEmbed | null> {
+    const endpoint = oembedEndpointFor(rawUrl);
+    if (!endpoint) return null;
+    let res: Response;
+    try {
+      res = await fetch(endpoint, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        headers: { 'user-agent': UNFURL_USER_AGENT, accept: 'application/json' },
+      });
+    } catch {
+      return null;
+    }
+    if (res.status !== 200) return null;
+    let data: unknown;
+    try {
+      data = JSON.parse(await this.readCapped(res));
+    } catch {
+      return null;
+    }
+    if (typeof data !== 'object' || data === null) return null;
+    const obj = data as Record<string, unknown>;
+    const title = clip(str(obj.title), MAX_EMBED_TITLE_LENGTH);
+    // Kanal-/Künstlername als Beschreibung – wie bei Discord unter dem Titel.
+    const description = clip(str(obj.author_name), MAX_EMBED_DESCRIPTION_LENGTH);
+    const siteName = clip(str(obj.provider_name), MAX_EMBED_SITENAME_LENGTH);
+    const imageUrl = resolveImage(str(obj.thumbnail_url), endpoint);
+    if (!title && !imageUrl) return null;
+    const embed: LinkEmbed = { url: rawUrl };
+    if (title) embed.title = title;
+    if (description) embed.description = description;
+    if (siteName) embed.siteName = siteName;
+    if (imageUrl) embed.imageUrl = imageUrl;
+    return embed;
   }
 
   /**
@@ -165,6 +210,32 @@ export class UnfurlService {
     if (imageUrl) embed.imageUrl = imageUrl;
     return embed;
   }
+}
+
+// --- oEmbed: feste Endpunkte bekannter Medien-Provider -------------------------
+
+/** Liefert den oEmbed-Endpunkt, wenn die URL zu YouTube/Spotify gehört. */
+function oembedEndpointFor(rawUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  const host = url.hostname.toLowerCase().replace(/^(www|m)\./, '');
+  if (host === 'youtu.be' || host === 'youtube.com' || host === 'music.youtube.com') {
+    return `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(rawUrl)}`;
+  }
+  if (host === 'open.spotify.com') {
+    return `https://open.spotify.com/oembed?url=${encodeURIComponent(rawUrl)}`;
+  }
+  return null;
+}
+
+/** Hilfsfunktion: nur nicht-leere Strings aus fremdem JSON übernehmen. */
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 // --- SSRF: private/reservierte IP-Bereiche -------------------------------------

@@ -34,9 +34,7 @@ export default function VoiceChannelView({ channel }: { channel: ChannelInfo }) 
         <span className="text-zinc-500">🔊</span>
         <h2 className="truncate font-semibold text-zinc-100">{channel.name}</h2>
         <span className="text-xs text-zinc-500">
-          {participants.length === 0
-            ? 'Niemand verbunden'
-            : `${participants.length} verbunden`}
+          {participants.length === 0 ? 'Niemand verbunden' : `${participants.length} verbunden`}
         </span>
       </header>
 
@@ -136,7 +134,8 @@ function ConnectedControls() {
   const toggleScreenShare = useVoiceStore((s) => s.toggleScreenShare);
   const leaveVoice = useVoiceStore((s) => s.leaveVoice);
 
-  const base = 'rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60';
+  const base =
+    'rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60';
   const off = 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700';
   const alert = 'bg-red-950/60 text-red-300 hover:bg-red-950';
   const on = 'bg-emerald-800/70 text-emerald-200 hover:bg-emerald-800';

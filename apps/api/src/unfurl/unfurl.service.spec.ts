@@ -107,4 +107,69 @@ describe('UnfurlService (SSRF-Schutz + Metadaten)', () => {
     expect(embed?.title).toBe('T');
     expect(embed?.imageUrl).toBeUndefined();
   });
+
+  describe('oEmbed für bekannte Medien-Provider (YouTube/Spotify)', () => {
+    function oembedResponse(body: Record<string, unknown>): Response {
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    it('holt YouTube-Metadaten über den festen oEmbed-Endpunkt (kein Scraping)', async () => {
+      fetchMock.mockResolvedValue(
+        oembedResponse({
+          title: 'Mein Video',
+          author_name: 'Mein Kanal',
+          provider_name: 'YouTube',
+          thumbnail_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+        }),
+      );
+      const embed = await service.unfurl('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const calledUrl = String(fetchMock.mock.calls[0][0]);
+      expect(calledUrl.startsWith('https://www.youtube.com/oembed?')).toBe(true);
+      // Nutzer-URL nur URL-kodiert als Query-Parameter (kein SSRF-Hebel).
+      expect(calledUrl).toContain(
+        encodeURIComponent('https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
+      );
+      expect(embed?.title).toBe('Mein Video');
+      expect(embed?.description).toBe('Mein Kanal'); // Kanalname als Beschreibung
+      expect(embed?.siteName).toBe('YouTube');
+      expect(embed?.imageUrl).toBe('https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
+      expect(embed?.url).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    });
+
+    it('nutzt für Spotify-Links den Spotify-oEmbed-Endpunkt', async () => {
+      fetchMock.mockResolvedValue(
+        oembedResponse({
+          title: 'Song',
+          provider_name: 'Spotify',
+          thumbnail_url: 'https://i.scdn.co/image/x',
+        }),
+      );
+      const embed = await service.unfurl('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT');
+      expect(
+        String(fetchMock.mock.calls[0][0]).startsWith('https://open.spotify.com/oembed?'),
+      ).toBe(true);
+      expect(embed?.title).toBe('Song');
+      expect(embed?.siteName).toBe('Spotify');
+    });
+
+    it('fällt bei oEmbed-Fehler auf das generische Scraping zurück', async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response('nicht gefunden', { status: 404 }))
+        .mockResolvedValueOnce(htmlResponse('<title>Video-Seite</title>'));
+      const embed = await service.unfurl('https://youtu.be/dQw4w9WgXcQ');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(embed?.title).toBe('Video-Seite');
+    });
+
+    it('lässt sich nicht durch youtube-ähnliche Fremd-Hosts auf oEmbed umleiten', async () => {
+      fetchMock.mockResolvedValue(htmlResponse('<title>Fake</title>'));
+      await service.unfurl('https://boese-youtube.com/watch?v=x');
+      // Kein oEmbed-Aufruf – der Host matcht nicht exakt, es wird normal gescrapt.
+      expect(String(fetchMock.mock.calls[0][0]).includes('/oembed')).toBe(false);
+    });
+  });
 });

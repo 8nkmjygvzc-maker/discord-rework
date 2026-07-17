@@ -31,7 +31,10 @@ const PRESENCE_OPTIONS: {
 ];
 
 /** Punkt-Farbe und Beschriftung des eigenen Status im Footer. */
-function ownPresenceDisplay(mode: PresenceMode, connected: boolean): { dot: string; title: string } {
+function ownPresenceDisplay(
+  mode: PresenceMode,
+  connected: boolean,
+): { dot: string; title: string } {
   if (!connected) return { dot: 'bg-zinc-600', title: 'Offline (nicht verbunden)' };
   switch (mode) {
     case 'dnd':

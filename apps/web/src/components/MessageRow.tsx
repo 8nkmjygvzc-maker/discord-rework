@@ -1,8 +1,18 @@
 import { useMemo, useState } from 'react';
+import { MAX_EMBEDS_PER_MESSAGE } from '@parley/shared';
 import type { DecodedMessageContent, LinkEmbed, MessageInfo } from '@parley/shared';
 import type { ReactionEventState } from '../store/messages';
 import { MentionTargets, splitMentions } from '../lib/mentions';
 import { splitLinks } from '../lib/links';
+import {
+  MediaEmbed,
+  detectMediaEmbed,
+  mediaEmbedKey,
+  spotifyPlayerHeight,
+  spotifyPlayerUrl,
+  youtubePlayerUrl,
+  youtubeThumbnailUrl,
+} from '../lib/mediaEmbeds';
 import AttachmentView from './AttachmentView';
 import Avatar from './Avatar';
 
@@ -243,9 +253,7 @@ export default function MessageRow({
                 />
               )
             )}
-            {content.embeds.map((embed, i) => (
-              <EmbedCard key={i} embed={embed} />
-            ))}
+            <EmbedList text={content.text} embeds={content.embeds} />
             {content.attachments.map((meta) => (
               <AttachmentView key={meta.id} meta={meta} />
             ))}
@@ -408,6 +416,143 @@ function MentionText({
         </span>
       )}
     </p>
+  );
+}
+
+/**
+ * Alle Vorschau-Karten einer Nachricht. YouTube-/Spotify-Links bekommen einen
+ * abspielbaren Player (à la Discord) statt der generischen Karte – erkannt wird
+ * beim LESER direkt aus den URLs (Text + Unfurl-Embeds), damit das auch dann
+ * funktioniert, wenn der Unfurl beim Absender keine Metadaten liefern konnte.
+ */
+function EmbedList({ text, embeds }: { text: string; embeds: LinkEmbed[] }) {
+  const { media, generic } = useMemo(() => {
+    const seen = new Set<string>();
+    const media: { key: string; item: MediaEmbed; meta: LinkEmbed | null }[] = [];
+    const generic: LinkEmbed[] = [];
+    // Unfurl-Embeds zuerst (liefern Titel/Beschreibung), dann Text-Links –
+    // so erscheinen Player auch ohne erfolgreichen Unfurl.
+    const candidates: { url: string; meta: LinkEmbed | null }[] = [
+      ...embeds.map((e) => ({ url: e.url, meta: e })),
+      ...splitLinks(text)
+        .filter((s) => s.href)
+        .map((s) => ({ url: s.href!, meta: null })),
+    ];
+    for (const { url, meta } of candidates) {
+      const item = detectMediaEmbed(url);
+      if (!item) {
+        if (meta) generic.push(meta);
+        continue;
+      }
+      const key = mediaEmbedKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (media.length < MAX_EMBEDS_PER_MESSAGE) media.push({ key, item, meta });
+    }
+    return { media, generic };
+  }, [text, embeds]);
+
+  return (
+    <>
+      {media.map(({ key, item, meta }) =>
+        item.provider === 'youtube' ? (
+          <YoutubeCard key={key} media={item} meta={meta} />
+        ) : (
+          <SpotifyCard key={key} media={item} />
+        ),
+      )}
+      {generic.map((embed, i) => (
+        <EmbedCard key={i} embed={embed} />
+      ))}
+    </>
+  );
+}
+
+/**
+ * YouTube-Vorschau: Thumbnail (deterministisch aus der Video-ID, kein Unfurl
+ * nötig) mit Play-Button; erst der Klick lädt den eingebetteten Player –
+ * so gibt es keinen automatischen Kontakt des Lesers zu YouTube-Playern.
+ */
+function YoutubeCard({
+  media,
+  meta,
+}: {
+  media: Extract<MediaEmbed, { provider: 'youtube' }>;
+  meta: LinkEmbed | null;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const [thumbOk, setThumbOk] = useState(true);
+  const watchUrl = meta?.url ?? `https://www.youtube.com/watch?v=${media.videoId}`;
+  return (
+    <div className="mt-1 max-w-md overflow-hidden rounded border-l-4 border-red-600 bg-zinc-800/60 p-3">
+      <p className="text-xs text-zinc-400">{meta?.siteName ?? 'YouTube'}</p>
+      {meta?.title && (
+        <a
+          href={watchUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-0.5 block font-semibold break-words text-indigo-300 hover:underline"
+        >
+          {meta.title}
+        </a>
+      )}
+      <div className="mt-2 aspect-video w-full overflow-hidden rounded bg-black">
+        {playing ? (
+          <iframe
+            src={youtubePlayerUrl(media)}
+            title={meta?.title ?? 'YouTube-Video'}
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+            referrerPolicy="no-referrer"
+            className="h-full w-full border-0"
+          />
+        ) : (
+          <button
+            type="button"
+            title="Video hier abspielen"
+            onClick={() => setPlaying(true)}
+            className="group/play relative block h-full w-full cursor-pointer"
+            data-testid="youtube-play"
+          >
+            {thumbOk && (
+              <img
+                src={youtubeThumbnailUrl(media.videoId)}
+                alt=""
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                onError={() => setThumbOk(false)}
+                className="h-full w-full object-cover"
+              />
+            )}
+            {/* Play-Badge im YouTube-Stil, zentriert über dem Thumbnail */}
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="flex h-12 w-16 items-center justify-center rounded-xl bg-black/70 text-2xl text-white transition group-hover/play:bg-red-600">
+                ▶
+              </span>
+            </span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Spotify-Vorschau: der offizielle Embed-Player direkt in der Nachricht
+ * (wie bei Discord). `loading="lazy"` lädt ihn erst, wenn er sichtbar wird.
+ */
+function SpotifyCard({ media }: { media: Extract<MediaEmbed, { provider: 'spotify' }> }) {
+  return (
+    <iframe
+      src={spotifyPlayerUrl(media)}
+      title="Spotify-Player"
+      height={spotifyPlayerHeight(media.kind)}
+      loading="lazy"
+      allow="encrypted-media; picture-in-picture"
+      referrerPolicy="no-referrer"
+      className="mt-1 w-full max-w-md rounded-xl border-0"
+      data-testid="spotify-player"
+    />
   );
 }
 
