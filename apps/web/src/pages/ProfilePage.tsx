@@ -3,9 +3,10 @@ import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
 import { disablePush, enablePush, pushStatus, type PushStatus } from '../lib/push';
-import { uploadAvatar, uploadBanner } from '../lib/profileImage';
+import { BANNER_ASPECT, uploadAvatar, uploadBanner, type CropRect } from '../lib/profileImage';
 import AudioSettings from '../components/AudioSettings';
 import Avatar from '../components/Avatar';
+import ImageCropDialog from '../components/ImageCropDialog';
 
 interface ProfilePageProps {
   /** Zurück zur Hauptansicht (gesetzt, sobald es eine gibt – ab Phase 3). */
@@ -26,6 +27,8 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const [pushBusy, setPushBusy] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [bannerBusy, setBannerBusy] = useState(false);
+  /** Gewählte Banner-Datei, für die gerade der Ausschnitt gewählt wird. */
+  const [bannerCropFile, setBannerCropFile] = useState<File | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
@@ -49,14 +52,24 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
     }
   }
 
-  /** Banner wählen → auf Querformat zuschneiden → hochladen. */
-  async function onBannerSelected(files: FileList | null) {
+  /** Banner wählen → Ausschnitt-Dialog öffnen (Upload erst nach Bestätigung). */
+  function onBannerSelected(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setFeedback({ kind: 'error', text: 'Bitte eine Bilddatei auswählen' });
+      return;
+    }
     setFeedback(null);
+    setBannerCropFile(file);
+  }
+
+  /** Vom Nutzer gewählten Ausschnitt zuschneiden und hochladen. */
+  async function onBannerCropConfirm(file: File, crop: CropRect) {
+    setBannerCropFile(null);
     setBannerBusy(true);
     try {
-      await uploadBanner(file);
+      await uploadBanner(file, crop);
       setFeedback({ kind: 'ok', text: 'Banner aktualisiert' });
     } catch (err) {
       setFeedback({
@@ -154,7 +167,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
           className="hidden"
           data-testid="banner-input"
           onChange={(e) => {
-            void onBannerSelected(e.target.files);
+            onBannerSelected(e.target.files);
             e.target.value = '';
           }}
         />
@@ -349,6 +362,17 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
           </div>
         </form>
       </div>
+
+      {/* Ausschnitt-Wahl fürs Banner: Verschieben + Zoomen vor dem Upload. */}
+      {bannerCropFile && (
+        <ImageCropDialog
+          file={bannerCropFile}
+          aspect={BANNER_ASPECT}
+          title="Banner zuschneiden"
+          onCancel={() => setBannerCropFile(null)}
+          onConfirm={(crop) => void onBannerCropConfirm(bannerCropFile, crop)}
+        />
+      )}
     </div>
   );
 }
