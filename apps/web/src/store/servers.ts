@@ -4,6 +4,7 @@ import {
   BanInfo,
   ChannelDeletePayload,
   ChannelInfo,
+  ChannelsReorderPayload,
   GatewayEventType,
   permissionsFromString,
   RoleInfo,
@@ -36,6 +37,8 @@ interface ServersState {
   updateServer: (serverId: string, changes: { name?: string; iconUrl?: '' }) => Promise<void>;
   createChannel: (name: string, type?: 'TEXT' | 'VOICE') => Promise<void>;
   deleteChannel: (channelId: string) => Promise<void>;
+  /** Kanal-Reihenfolge neu setzen (ManageChannels) – Liste = ALLE Kanäle. */
+  reorderChannels: (orderedIds: string[]) => Promise<void>;
 
   createRole: (name: string) => Promise<void>;
   updateRole: (
@@ -176,6 +179,32 @@ export const useServersStore = create<ServersState>()((set, get) => ({
       serverId,
       channelId,
     } satisfies ChannelDeletePayload);
+  },
+
+  reorderChannels: async (orderedIds) => {
+    const server = get().selectedServer;
+    if (!server) return;
+    // Optimistisch umsortieren, damit der Ziehende kein Zurückspringen sieht –
+    // die Server-Antwort (mit den echten Positionen) bestätigt gleich darauf.
+    const byId = new Map(server.channels.map((c) => [c.id, c]));
+    const optimistic = orderedIds.flatMap((id) => byId.get(id) ?? []);
+    if (optimistic.length === server.channels.length) {
+      set({ selectedServer: { ...server, channels: optimistic } });
+    }
+    try {
+      const channels = await authFetch<ChannelInfo[]>(
+        `/api/servers/${server.id}/channels/positions`,
+        { method: 'PUT', body: { channelIds: orderedIds } },
+      );
+      get().handleGatewayEvent('CHANNELS_REORDER', {
+        serverId: server.id,
+        channels,
+      } satisfies ChannelsReorderPayload);
+    } catch (err) {
+      // Z. B. Kanal parallel angelegt/gelöscht (400): Server-Stand neu laden.
+      void get().selectServer(server.id);
+      throw err;
+    }
   },
 
   createRole: async (name) => {
@@ -438,6 +467,15 @@ export const useServersStore = create<ServersState>()((set, get) => ({
             selectedChannelId: s.selectedChannelId ?? (channel.type === 'TEXT' ? channel.id : null),
           };
         });
+        return;
+      }
+      case 'CHANNELS_REORDER': {
+        const { serverId, channels } = d as ChannelsReorderPayload;
+        set((s) =>
+          s.selectedServer?.id === serverId
+            ? { selectedServer: { ...s.selectedServer, channels: [...channels].sort(byPosition) } }
+            : {},
+        );
         return;
       }
       case 'CHANNEL_DELETE': {

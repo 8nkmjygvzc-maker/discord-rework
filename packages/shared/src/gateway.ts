@@ -49,6 +49,9 @@ export type GatewayEventType =
   | 'CHANNEL_CREATE'
   | 'CHANNEL_UPDATE'
   | 'CHANNEL_DELETE'
+  // Verbesserungs-Runde: Kanal-Reihenfolge per Drag & Drop geändert – Payload
+  // trägt die komplette, neu positionierte Kanalliste (ChannelsReorderPayload).
+  | 'CHANNELS_REORDER'
   // Phase 4 – Text-Chat:
   | 'MESSAGE_CREATE'
   // Verbesserungs-Runde: „X schreibt …“ – an dieselben Empfänger wie

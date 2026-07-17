@@ -6,6 +6,7 @@ import {
   VoiceState,
 } from '@parley/shared';
 import { useState } from 'react';
+import type { DragEvent } from 'react';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
 import { useVoiceStore } from '../store/voice';
@@ -26,6 +27,15 @@ function runAction(what: string, action: Promise<void>): void {
         err instanceof ApiError ? `${what}: ${err.message}` : `${what} – Server nicht erreichbar.`,
       );
   });
+}
+
+/** DnD-Handler einer Kanalzeile – leer, wenn der Nutzer nicht sortieren darf. */
+interface ChannelDragProps {
+  draggable?: boolean;
+  onDragStart?: (e: DragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (e: DragEvent<HTMLButtonElement>) => void;
+  onDrop?: (e: DragEvent<HTMLButtonElement>) => void;
 }
 
 interface ChannelSidebarProps {
@@ -51,9 +61,14 @@ export default function ChannelSidebar({
   const selectedChannelId = useServersStore((s) => s.selectedChannelId);
   const selectChannel = useServersStore((s) => s.selectChannel);
   const deleteChannel = useServersStore((s) => s.deleteChannel);
+  const reorderChannels = useServersStore((s) => s.reorderChannels);
   const leaveServer = useServersStore((s) => s.leaveServer);
   const deleteServer = useServersStore((s) => s.deleteServer);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Kanal-Sortierung per Drag & Drop (Verbesserungs-Runde): gezogener Kanal
+  // und aktuelles Ziel (Einfüge-Linie über bzw. unter der Ziel-Zeile).
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
 
   if (!user) return null;
   const isOwner = server?.ownerId === user.id;
@@ -71,6 +86,74 @@ export default function ChannelSidebar({
   const textChannels = server?.channels.filter((c) => c.type === 'TEXT') ?? [];
   const voiceChannels = server?.channels.filter((c) => c.type === 'VOICE') ?? [];
   const canDelete = canManageChannels && (server?.channels.length ?? 0) > 1;
+
+  /** Drop ausführen: Sektion neu ordnen und die KOMPLETTE Liste zum Server. */
+  const commitDrop = (target: ChannelInfo) => {
+    const drop = dropTarget;
+    const dragged = server?.channels.find((c) => c.id === dragId) ?? null;
+    setDragId(null);
+    setDropTarget(null);
+    // Nur innerhalb derselben Sektion (Text bleibt bei Text, Voice bei Voice).
+    if (!server || !dragged || !drop || drop.id !== target.id) return;
+    if (dragged.id === target.id || dragged.type !== target.type) return;
+    const section = dragged.type === 'TEXT' ? textChannels : voiceChannels;
+    const rest = section.filter((c) => c.id !== dragged.id);
+    const idx = rest.findIndex((c) => c.id === target.id);
+    if (idx < 0) return;
+    const insertAt = drop.after ? idx + 1 : idx;
+    const newSection = [...rest.slice(0, insertAt), dragged, ...rest.slice(insertAt)];
+    if (newSection.every((c, i) => c.id === section[i]?.id)) return; // nichts bewegt
+    const newText = dragged.type === 'TEXT' ? newSection : textChannels;
+    const newVoice = dragged.type === 'VOICE' ? newSection : voiceChannels;
+    // Der Endpunkt verlangt ALLE Kanäle – etwaige andere Typen hinten anhängen.
+    const others = server.channels.filter((c) => c.type !== 'TEXT' && c.type !== 'VOICE');
+    const ids = [...newText, ...newVoice, ...others].map((c) => c.id);
+    runAction('Kanäle sortieren', reorderChannels(ids));
+  };
+
+  /** DnD-Handler einer Kanalzeile – nur mit ManageChannels aktiv. */
+  const dragProps = (channel: ChannelInfo): ChannelDragProps => {
+    if (!canManageChannels) return {};
+    return {
+      draggable: true,
+      onDragStart: (e) => {
+        setDragId(channel.id);
+        e.dataTransfer.effectAllowed = 'move';
+        // Firefox startet den Drag nur, wenn Daten gesetzt sind.
+        e.dataTransfer.setData('text/plain', channel.id);
+      },
+      onDragEnd: () => {
+        setDragId(null);
+        setDropTarget(null);
+      },
+      onDragOver: (e) => {
+        const dragged = server?.channels.find((c) => c.id === dragId);
+        if (!dragged || dragged.id === channel.id || dragged.type !== channel.type) return;
+        e.preventDefault(); // erlaubt den Drop
+        e.dataTransfer.dropEffect = 'move';
+        const rect = e.currentTarget.getBoundingClientRect();
+        const after = e.clientY > rect.top + rect.height / 2;
+        setDropTarget((t) =>
+          t?.id === channel.id && t.after === after ? t : { id: channel.id, after },
+        );
+      },
+      onDrop: (e) => {
+        e.preventDefault();
+        commitDrop(channel);
+      },
+    };
+  };
+
+  /** Einfüge-Linie (über/unter der Zeile) + Transparenz der gezogenen Zeile. */
+  const dragClass = (channel: ChannelInfo): string => {
+    const classes: string[] = [];
+    if (dragId === channel.id) classes.push('opacity-40');
+    if (dragId && dropTarget?.id === channel.id && dragId !== channel.id) {
+      // box-shadow statt border, damit beim Ziehen nichts im Layout springt.
+      classes.push(dropTarget.after ? 'shadow-[0_2px_0_0_#818cf8]' : 'shadow-[0_-2px_0_0_#818cf8]');
+    }
+    return classes.join(' ');
+  };
 
   /** Menü-Eintrag anklicken: Menü zu, Aktion ausführen. */
   const menuAction = (action: () => void) => () => {
@@ -182,6 +265,7 @@ export default function ChannelSidebar({
                 <li key={channel.id} className="group">
                   <button
                     type="button"
+                    {...dragProps(channel)}
                     onClick={() => {
                       selectChannel(channel.id);
                       // Handy: Kanalwahl schließt den Navigations-Drawer.
@@ -191,7 +275,7 @@ export default function ChannelSidebar({
                       channel.id === selectedChannelId
                         ? 'bg-zinc-700/60 text-zinc-100'
                         : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                    }`}
+                    } ${dragClass(channel)}`}
                   >
                     <span className="text-zinc-500">#</span>
                     <span className="truncate">{channel.name}</span>
@@ -213,7 +297,13 @@ export default function ChannelSidebar({
             />
             <ul className="space-y-0.5">
               {voiceChannels.map((channel) => (
-                <VoiceChannelRow key={channel.id} channel={channel} canDelete={canDelete} />
+                <VoiceChannelRow
+                  key={channel.id}
+                  channel={channel}
+                  canDelete={canDelete}
+                  dragProps={dragProps(channel)}
+                  dragClass={dragClass(channel)}
+                />
               ))}
               {voiceChannels.length === 0 && (
                 <li className="px-2 py-1 text-xs text-zinc-600">Noch keine Sprachkanäle</li>
@@ -302,7 +392,17 @@ function DeleteX({ onClick }: { onClick: () => void }) {
 }
 
 /** Eine Sprachkanal-Zeile inkl. Teilnehmerliste darunter. */
-function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDelete: boolean }) {
+function VoiceChannelRow({
+  channel,
+  canDelete,
+  dragProps,
+  dragClass,
+}: {
+  channel: ChannelInfo;
+  canDelete: boolean;
+  dragProps: ChannelDragProps;
+  dragClass: string;
+}) {
   const user = useAuthStore((s) => s.user);
   const deleteChannel = useServersStore((s) => s.deleteChannel);
   const selectedChannelId = useServersStore((s) => s.selectedChannelId);
@@ -325,6 +425,7 @@ function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDele
     <li className="group">
       <button
         type="button"
+        {...dragProps}
         // Klick öffnet die Großansicht des Kanals im Hauptbereich UND tritt bei.
         onClick={() => {
           selectChannel(channel.id);
@@ -338,7 +439,7 @@ function VoiceChannelRow({ channel, canDelete }: { channel: ChannelInfo; canDele
             : isActive
               ? 'text-zinc-100 hover:bg-zinc-800'
               : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-        }`}
+        } ${dragClass}`}
       >
         <span className="text-zinc-500">🔊</span>
         <span className="truncate">{channel.name}</span>

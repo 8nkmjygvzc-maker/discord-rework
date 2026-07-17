@@ -10,6 +10,7 @@ import type { Readable } from 'node:stream';
 import { Channel, Membership, Server, User } from '@prisma/client';
 import {
   ChannelInfo,
+  ChannelsReorderPayload,
   DEFAULT_ROLE_PERMISSIONS,
   MAX_PROFILE_IMAGE_BYTES,
   Permissions,
@@ -29,6 +30,7 @@ import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
+import { ReorderChannelsDto } from './dto/reorder-channels.dto';
 
 type MembershipWithUser = Membership & {
   user: Pick<User, 'username' | 'avatarUrl' | 'bannerUrl' | 'status'>;
@@ -348,6 +350,46 @@ export class ServersService {
       await this.memberIds(channel.serverId!),
     );
     return info;
+  }
+
+  /**
+   * Kanal-Reihenfolge komplett neu setzen (Verbesserungs-Runde). Erwartet
+   * GENAU alle Kanäle des Servers; die Position wird zum Listen-Index. So
+   * bleiben die Positionen lückenlos und alle Clients sehen dieselbe Ordnung.
+   */
+  async reorderChannels(
+    serverId: string,
+    userId: string,
+    dto: ReorderChannelsDto,
+  ): Promise<ChannelInfo[]> {
+    await this.permissions.requirePermission(serverId, userId, Permissions.ManageChannels);
+    const existing = await this.prisma.channel.findMany({
+      where: { serverId },
+      select: { id: true },
+    });
+    // Duplikate blockt schon das DTO (@ArrayUnique); der Set-Größen-Vergleich
+    // fängt sie zur Sicherheit trotzdem (sonst würde ein Kanal doppelt gesetzt
+    // und ein anderer gar nicht).
+    const existingIds = new Set(existing.map((c) => c.id));
+    const sameSet =
+      dto.channelIds.length === existingIds.size &&
+      new Set(dto.channelIds).size === dto.channelIds.length &&
+      dto.channelIds.every((id) => existingIds.has(id));
+    if (!sameSet) {
+      throw new BadRequestException('Die Liste muss genau alle Kanäle des Servers enthalten');
+    }
+    const updated = await this.prisma.$transaction(
+      dto.channelIds.map((id, position) =>
+        this.prisma.channel.update({ where: { id }, data: { position } }),
+      ),
+    );
+    const channels = updated.map(toChannelInfo);
+    await this.gateway.publishDispatch(
+      'CHANNELS_REORDER',
+      { serverId, channels } satisfies ChannelsReorderPayload,
+      await this.memberIds(serverId),
+    );
+    return channels;
   }
 
   async deleteChannel(channelId: string, userId: string): Promise<void> {

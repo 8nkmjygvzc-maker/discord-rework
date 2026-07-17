@@ -11,6 +11,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Req,
   StreamableFile,
   UseGuards,
@@ -25,6 +26,7 @@ import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
+import { ReorderChannelsDto } from './dto/reorder-channels.dto';
 
 @Controller()
 @UseGuards(AuthGuard)
@@ -89,6 +91,16 @@ export class ServersController {
     @Body() dto: CreateChannelDto,
   ): Promise<ChannelInfo> {
     return this.servers.createChannel(id, user.sub, dto);
+  }
+
+  /** Kanal-Reihenfolge neu setzen (ManageChannels) – Liste = ALLE Kanäle. */
+  @Put('servers/:id/channels/positions')
+  reorderChannels(
+    @CurrentUser() user: AccessTokenPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReorderChannelsDto,
+  ): Promise<ChannelInfo[]> {
+    return this.servers.reorderChannels(id, user.sub, dto);
   }
 
   @Patch('channels/:id')

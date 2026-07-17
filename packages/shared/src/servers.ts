@@ -72,3 +72,18 @@ export interface UpdateChannelRequest {
   name?: string;
   position?: number;
 }
+
+/**
+ * Kanal-Reihenfolge neu setzen (Verbesserungs-Runde). Die Liste muss GENAU
+ * alle Kanäle des Servers enthalten – die Position wird zum Listen-Index,
+ * damit die Reihenfolge lückenlos und für alle Clients identisch ist.
+ */
+export interface ReorderChannelsRequest {
+  channelIds: string[];
+}
+
+/** Payload des CHANNELS_REORDER-Events: alle Kanäle mit neuen Positionen. */
+export interface ChannelsReorderPayload {
+  serverId: string;
+  channels: ChannelInfo[];
+}
