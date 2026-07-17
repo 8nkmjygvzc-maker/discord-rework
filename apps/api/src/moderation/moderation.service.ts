@@ -23,7 +23,7 @@ import { MEMBER_USER_SELECT, toServerMember } from '../servers/servers.service';
 const AUDIT_LOG_LIMIT = 100;
 
 type MemberWithUser = Membership & {
-  user: Pick<User, 'username' | 'avatarUrl' | 'status'>;
+  user: Pick<User, 'username' | 'avatarUrl' | 'bannerUrl' | 'status'>;
   roles: { roleId: string }[];
 };
 

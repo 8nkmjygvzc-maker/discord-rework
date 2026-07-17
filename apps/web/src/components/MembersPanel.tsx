@@ -9,6 +9,7 @@ import {
 import { useServersStore } from '../store/servers';
 import { usePresenceStore } from '../store/presence';
 import { useAuthStore } from '../store/auth';
+import { useUiStore } from '../store/ui';
 import { useVoiceStore } from '../store/voice';
 import { ApiError } from '../lib/api';
 import { memberRoleColor } from '../lib/roleColors';
@@ -144,8 +145,23 @@ export default function MembersPanel() {
 
           return (
             <li key={member.userId} className={online ? '' : 'opacity-50'}>
-              <div className="flex items-center gap-2 rounded px-1 py-1.5">
-                <div className="relative shrink-0">
+              <div className="flex items-center gap-2 rounded px-1 py-1.5 hover:bg-zinc-800/60">
+                {/* Klick auf Avatar/Name öffnet die Profilkarte. */}
+                <button
+                  type="button"
+                  title={`Profil von ${member.username} ansehen`}
+                  onClick={() =>
+                    useUiStore.getState().openProfile({
+                      id: member.userId,
+                      username: member.username,
+                      nickname: member.nickname,
+                      avatarUrl: member.avatarUrl,
+                      bannerUrl: member.bannerUrl,
+                      status: member.status,
+                    })
+                  }
+                  className="relative shrink-0 cursor-pointer"
+                >
                   <Avatar
                     name={member.username}
                     avatarUrl={member.avatarUrl}
@@ -156,15 +172,27 @@ export default function MembersPanel() {
                       online ? 'bg-emerald-500' : 'bg-zinc-600'
                     }`}
                   />
-                </div>
+                </button>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <span
-                      className="truncate text-sm text-zinc-300"
+                    <button
+                      type="button"
+                      title={`Profil von ${member.username} ansehen`}
+                      onClick={() =>
+                        useUiStore.getState().openProfile({
+                          id: member.userId,
+                          username: member.username,
+                          nickname: member.nickname,
+                          avatarUrl: member.avatarUrl,
+                          bannerUrl: member.bannerUrl,
+                          status: member.status,
+                        })
+                      }
+                      className="cursor-pointer truncate text-sm text-zinc-300 hover:underline"
                       style={nameColor ? { color: nameColor } : undefined}
                     >
                       {member.nickname ?? member.username}
-                    </span>
+                    </button>
                     {timedOut && (
                       <span
                         title={`In Auszeit bis ${new Date(member.timeoutUntil!).toLocaleString('de-DE')}`}

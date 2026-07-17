@@ -65,7 +65,7 @@ export class SoundboardService {
     await this.assertNotTimedOut(serverId, userId);
     if (data.length === 0) throw new BadRequestException('Leere Audiodatei');
     if (data.length > MAX_SOUNDBOARD_SOUND_BYTES) {
-      throw new BadRequestException('Sound ist zu groß (max. 1 MiB)');
+      throw new BadRequestException('Sound ist zu groß (max. 10 MiB)');
     }
     if (dto.emoji !== undefined && !isPlausibleReactionEmoji(dto.emoji)) {
       throw new BadRequestException('Ungültiges Emoji');

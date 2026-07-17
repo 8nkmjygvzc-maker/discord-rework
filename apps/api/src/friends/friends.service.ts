@@ -15,13 +15,20 @@ export const publicUserSelect = {
   id: true,
   username: true,
   avatarUrl: true,
+  bannerUrl: true,
   status: true,
 } as const;
 
-type PublicUserRow = Pick<User, 'id' | 'username' | 'avatarUrl' | 'status'>;
+type PublicUserRow = Pick<User, 'id' | 'username' | 'avatarUrl' | 'bannerUrl' | 'status'>;
 
 export function toPublicUser(user: PublicUserRow): PublicUser {
-  return { id: user.id, username: user.username, avatarUrl: user.avatarUrl, status: user.status };
+  return {
+    id: user.id,
+    username: user.username,
+    avatarUrl: user.avatarUrl,
+    bannerUrl: user.bannerUrl,
+    status: user.status,
+  };
 }
 
 type FriendshipWithUsers = Friendship & { user: PublicUserRow; friend: PublicUserRow };

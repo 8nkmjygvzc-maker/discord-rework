@@ -4,6 +4,8 @@ export interface AuthUser {
   username: string;
   email: string;
   avatarUrl: string | null;
+  /** Profil-Banner (Querformat) – null = Farbverlauf auf der Profilkarte. */
+  bannerUrl: string | null;
   status: string;
   createdAt: string;
 }
@@ -19,6 +21,8 @@ export interface AuthResponse {
 export interface UpdateProfileRequest {
   status?: string;
   avatarUrl?: string;
+  /** Nur '' erlaubt (Banner entfernen) – gesetzt wird per Upload-Endpunkt. */
+  bannerUrl?: string;
 }
 
 /**

@@ -15,4 +15,9 @@ export class UpdateProfileDto {
   @IsOptional()
   @Equals('', { message: 'Profilbilder werden über den Upload gesetzt' })
   avatarUrl?: string;
+
+  /** Wie avatarUrl: nur '' erlaubt (Banner entfernen), gesetzt wird per Upload. */
+  @IsOptional()
+  @Equals('', { message: 'Banner werden über den Upload gesetzt' })
+  bannerUrl?: string;
 }

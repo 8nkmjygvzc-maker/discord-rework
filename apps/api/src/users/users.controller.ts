@@ -48,6 +48,17 @@ export class UsersController {
     }
     return this.users.setAvatar(user.sub, req.body);
   }
+
+  /** Profil-Banner hochladen – roher Bild-Body als octet-stream. */
+  @Post('me/banner')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ limit: 10, windowS: 60 })
+  uploadBanner(@CurrentUser() user: AccessTokenPayload, @Req() req: Request): Promise<AuthUser> {
+    if (!Buffer.isBuffer(req.body)) {
+      throw new BadRequestException('Bild als application/octet-stream senden');
+    }
+    return this.users.setBanner(user.sub, req.body);
+  }
 }
 
 /**
@@ -65,6 +76,13 @@ export class UsersPublicController {
   @Header('Cache-Control', 'public, max-age=31536000, immutable')
   async getAvatar(@Param('id', ParseUUIDPipe) id: string): Promise<StreamableFile> {
     const { stream, sizeBytes, contentType } = await this.users.getAvatarStream(id);
+    return new StreamableFile(stream, { type: contentType, length: sizeBytes });
+  }
+
+  @Get(':id/banner')
+  @Header('Cache-Control', 'public, max-age=31536000, immutable')
+  async getBanner(@Param('id', ParseUUIDPipe) id: string): Promise<StreamableFile> {
+    const { stream, sizeBytes, contentType } = await this.users.getBannerStream(id);
     return new StreamableFile(stream, { type: contentType, length: sizeBytes });
   }
 }

@@ -18,8 +18,8 @@ model User {
   email        String   @unique
   passwordHash String
   avatarUrl    String?
-  // Aus Migration 20260713004444 (Feature aktuell ohne API-Endpunkt; Spalte
-  // bleibt erhalten, damit Schema und DB übereinstimmen).
+  // Profil-Banner (Querformat-Bild oben auf der Profilkarte), wie avatarUrl
+  // nur über den Upload-Endpunkt setzbar.
   bannerUrl    String?
   // Frei wählbarer Status-Text fürs Profil; Online-Presence läuft über Redis.
   status       String   @default("")

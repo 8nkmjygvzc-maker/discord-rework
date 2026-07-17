@@ -102,13 +102,13 @@ export const useSoundboardStore = create<SoundboardStoreState>()((set, get) => (
 
   upload: async (serverId, file, meta) => {
     if (file.size > MAX_SOUNDBOARD_SOUND_BYTES) {
-      throw new Error(`„${file.name}“ ist größer als 1 MiB`);
+      throw new Error(`„${file.name}“ ist größer als 10 MiB`);
     }
     const mimeType = file.type;
     if (!mimeType.startsWith('audio/')) {
       throw new Error(`„${file.name}“ ist keine Audiodatei`);
     }
-    // Dekodierbarkeit + Dauer prüfen, BEVOR Bytes zum Server wandern.
+    // Dekodierbarkeit prüfen, BEVOR Bytes zum Server wandern.
     await probeUploadableAudio(file);
 
     const params = new URLSearchParams({ name: meta.name, mimeType });

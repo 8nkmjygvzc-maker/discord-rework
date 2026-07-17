@@ -109,6 +109,15 @@ function dismissIncoming(channelId?: string): void {
   useVoiceStore.setState({ incomingCall: null });
 }
 
+/**
+ * Wer sitzt (außer mir) gerade im VERBUNDENEN Sprachkanal? Bewusst getrennt
+ * von `voiceStates` (das ist nur das Roster des AUSGEWÄHLTEN Servers und wird
+ * beim Serverwechsel ersetzt) – nur so lassen sich Join/Leave-Sounds für
+ * andere Teilnehmer zuverlässig auslösen, auch während man einen anderen
+ * Server ansieht. Mute-/Kamera-Updates (Nutzer bereits im Set) bleiben stumm.
+ */
+const channelPeers = new Set<string>();
+
 export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   activeChannelId: null,
   activeServerId: null,
@@ -130,6 +139,21 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
   setDmCallStates: (byChannel) => set({ dmCalls: byChannel }),
 
   handleVoiceStateUpdate: (d) => {
+    // Join/Leave-Sound für ANDERE im eigenen Kanal (Verbesserungs-Runde) –
+    // gilt für Sprachkanäle UND private Anrufe (beide laufen über dieses Event).
+    const me = useAuthStore.getState().user;
+    const s0 = get();
+    if (me && d.userId !== me.id && s0.status === 'connected' && s0.activeChannelId) {
+      const isHere = d.state !== null && d.channelId === s0.activeChannelId;
+      const wasHere = channelPeers.has(d.userId);
+      if (isHere && !wasHere) {
+        channelPeers.add(d.userId);
+        if (!s0.selfDeafened) playSound('userJoin');
+      } else if (!isHere && wasHere) {
+        channelPeers.delete(d.userId);
+        if (!s0.selfDeafened) playSound('userLeave');
+      }
+    }
     // Privater Anruf (DM-Kanal): eigenen Roster pro Kanal pflegen – der
     // Server-Roster unten wird bei jedem Serverwechsel überschrieben.
     if (d.serverId === null) {
@@ -256,6 +280,15 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
         return;
       }
       set({ status: 'connected', hasMic: client.hasMic });
+      // Bereits anwesende Teilnehmer merken (ohne Sound – man kommt ja selbst).
+      // Bei privaten Anrufen steht der Roster in dmCalls statt in voiceStates.
+      channelPeers.clear();
+      for (const v of get().voiceStates) {
+        if (v.channelId === channel.id && v.userId !== self.id) channelPeers.add(v.userId);
+      }
+      for (const v of get().dmCalls[channel.id] ?? []) {
+        if (v.userId !== self.id) channelPeers.add(v.userId);
+      }
       playSound('connect');
       // Videoanruf (🎥 im DM-Chat): Kamera direkt nach dem Verbinden starten.
       if (opts?.withCamera) await get().toggleCamera();
@@ -281,6 +314,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     const channelId = get().activeChannelId;
     // Nur wenn wirklich eine Verbindung bestand (nicht bei Fehler-/Idle-Zustand).
     if (channelId && get().status === 'connected' && !opts?.silent) playSound('disconnect');
+    channelPeers.clear();
     client?.disconnect();
     client = null;
     set({
@@ -373,6 +407,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
 
   handleVoiceClosed: () => {
     client = null;
+    channelPeers.clear();
     // Medien-WS ist weg – Roster serverseitig freigeben und UI zurücksetzen.
     const channelId = get().activeChannelId;
     if (channelId && get().status === 'connected') playSound('disconnect');
@@ -428,6 +463,7 @@ export const useVoiceStore = create<VoiceStoreState>()((set, get) => ({
     client?.disconnect();
     client = null;
     stopRinging();
+    channelPeers.clear();
     set({
       activeChannelId: null,
       activeServerId: null,

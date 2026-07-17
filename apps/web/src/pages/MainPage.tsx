@@ -2,7 +2,9 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useServersStore } from '../store/servers';
 import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
+import { useUiStore } from '../store/ui';
 import ServerDock from '../components/ServerDock';
+import MobileServerRail from '../components/MobileServerRail';
 import ChannelSidebar from '../components/ChannelSidebar';
 import MembersPanel from '../components/MembersPanel';
 import ChatView from '../components/ChatView';
@@ -11,6 +13,9 @@ import VoiceChannelView from '../components/VoiceChannelView';
 import HomeView from '../components/HomeView';
 import RolesDialog from '../components/RolesDialog';
 import InviteDialog from '../components/InviteDialog';
+import ModerationDialog from '../components/ModerationDialog';
+import ServerSettingsDialog from '../components/ServerSettingsDialog';
+import UserProfileCard from '../components/UserProfileCard';
 import Modal from '../components/Modal';
 import { ApiError } from '../lib/api';
 import { useAuthStore } from '../store/auth';
@@ -20,7 +25,15 @@ interface MainPageProps {
   onOpenProfile: () => void;
 }
 
-type DialogKind = 'createServer' | 'joinServer' | 'createChannel' | 'roles' | 'invite' | null;
+type DialogKind =
+  | 'createServer'
+  | 'joinServer'
+  | 'createChannel'
+  | 'roles'
+  | 'invite'
+  | 'serverSettings'
+  | 'moderation'
+  | null;
 
 /** Extrahiert den Code aus einem Einladungslink oder nimmt die Eingabe als Code. */
 function extractInviteCode(input: string): string {
@@ -70,6 +83,27 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
   // Ohne Server ist Home die sinnvollere Ansicht (statt leerem Zustand).
   const showHome = home || (loaded && servers.length === 0);
 
+  // Handy-Optimierung: linke Navigation und Mitglieder-Panel sind unter dem
+  // md-Breakpoint Drawer (siehe store/ui.ts); auf dem Desktop wirken die
+  // max-md:-Klassen nicht und alles liegt wie bisher nebeneinander.
+  const navOpen = useUiStore((s) => s.navOpen);
+  const membersOpen = useUiStore((s) => s.membersOpen);
+  const closeNav = useUiStore((s) => s.closeNav);
+  const closeMembers = useUiStore((s) => s.closeMembers);
+
+  const mobileRail = (
+    <MobileServerRail
+      homeActive={showHome}
+      onSelectHome={() => setHome(true)}
+      onSelectServer={(serverId) => {
+        setHome(false);
+        void selectServer(serverId);
+      }}
+      onCreateServer={() => setDialog('createServer')}
+      onJoinServer={() => setDialog('joinServer')}
+    />
+  );
+
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-zinc-800 text-zinc-100">
       <div className="flex min-h-0 min-w-0 flex-1">
@@ -78,18 +112,32 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
             onOpenProfile={onOpenProfile}
             onCreateServer={() => setDialog('createServer')}
             onJoinServer={() => setDialog('joinServer')}
+            mobileRail={mobileRail}
           />
         ) : (
           <>
-            <ChannelSidebar
-              onCreateChannel={(type) => {
-                setChannelType(type);
-                setDialog('createChannel');
-              }}
-              onOpenProfile={onOpenProfile}
-              onOpenRoles={() => setDialog('roles')}
-              onOpenInvite={() => setDialog('invite')}
-            />
+            {/* Linke Spalte: Server-Leiste (nur Handy) + Kanal-Sidebar */}
+            <div
+              className={`flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:shadow-2xl max-md:transition-transform max-md:duration-200 ${
+                navOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full'
+              }`}
+            >
+              {mobileRail}
+              <ChannelSidebar
+                onCreateChannel={(type) => {
+                  setChannelType(type);
+                  setDialog('createChannel');
+                }}
+                onOpenProfile={onOpenProfile}
+                onOpenRoles={() => setDialog('roles')}
+                onOpenInvite={() => setDialog('invite')}
+                onOpenSettings={() => setDialog('serverSettings')}
+                onOpenModeration={() => setDialog('moderation')}
+              />
+            </div>
+            {navOpen && (
+              <div className="fixed inset-0 z-30 bg-black/60 md:hidden" onClick={closeNav} />
+            )}
 
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* Sprachkanal ausgewählt → Großansicht (inkl. eigener Video-
@@ -102,7 +150,15 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
                   {channel ? (
                     <ChatView channel={channel} />
                   ) : (
-                    <main className="flex flex-1 items-center justify-center text-zinc-500">
+                    <main className="relative flex flex-1 items-center justify-center text-zinc-500">
+                      <button
+                        type="button"
+                        title="Navigation anzeigen"
+                        onClick={() => useUiStore.getState().toggleNav()}
+                        className="absolute top-3 left-3 rounded px-2 py-1 text-zinc-400 hover:bg-zinc-700/50 md:hidden"
+                      >
+                        ☰
+                      </button>
                       Wähle einen Kanal
                     </main>
                   )}
@@ -110,7 +166,17 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
               )}
             </div>
 
-            <MembersPanel />
+            {/* Mitglieder-Panel: rechts fest (Desktop) bzw. Drawer (Handy). */}
+            <div
+              className={`flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:shadow-2xl max-md:transition-transform max-md:duration-200 ${
+                membersOpen ? 'max-md:translate-x-0' : 'max-md:translate-x-full'
+              }`}
+            >
+              <MembersPanel />
+            </div>
+            {membersOpen && (
+              <div className="fixed inset-0 z-30 bg-black/60 md:hidden" onClick={closeMembers} />
+            )}
           </>
         )}
       </div>
@@ -146,6 +212,19 @@ export default function MainPage({ onOpenProfile }: MainPageProps) {
       {dialog === 'invite' && server && (
         <InviteDialog serverId={server.id} onClose={() => setDialog(null)} />
       )}
+      {dialog === 'serverSettings' && server && (
+        <ServerSettingsDialog
+          onClose={() => setDialog(null)}
+          onOpenRoles={() => setDialog('roles')}
+          onOpenInvite={() => setDialog('invite')}
+          onOpenModeration={() => setDialog('moderation')}
+        />
+      )}
+      {dialog === 'moderation' && server && <ModerationDialog onClose={() => setDialog(null)} />}
+
+      {/* Profilkarte (Klick auf Avatar/Name); „Nachricht senden“ wechselt zur
+          Home-Ansicht, wo der geöffnete DM-Kanal bereits ausgewählt ist. */}
+      <UserProfileCard onOpenDm={() => setHome(true)} />
     </div>
   );
 }

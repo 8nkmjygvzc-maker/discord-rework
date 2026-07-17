@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
 import { ApiError } from '../lib/api';
 import { disablePush, enablePush, pushStatus, type PushStatus } from '../lib/push';
-import { uploadAvatar } from '../lib/profileImage';
+import { uploadAvatar, uploadBanner } from '../lib/profileImage';
 import AudioSettings from '../components/AudioSettings';
 import Avatar from '../components/Avatar';
 
@@ -25,7 +25,9 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const [push, setPush] = useState<PushStatus | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [bannerBusy, setBannerBusy] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
 
   /** Profilbild wählen → clientseitig verkleinern → hochladen (Phase 15). */
   async function onAvatarSelected(files: FileList | null) {
@@ -44,6 +46,43 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
       });
     } finally {
       setAvatarBusy(false);
+    }
+  }
+
+  /** Banner wählen → auf Querformat zuschneiden → hochladen. */
+  async function onBannerSelected(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setFeedback(null);
+    setBannerBusy(true);
+    try {
+      await uploadBanner(file);
+      setFeedback({ kind: 'ok', text: 'Banner aktualisiert' });
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        text:
+          err instanceof ApiError || err instanceof Error ? err.message : 'Upload fehlgeschlagen',
+      });
+    } finally {
+      setBannerBusy(false);
+    }
+  }
+
+  /** Banner entfernen (bannerUrl: '' → Server setzt null). */
+  async function onBannerRemove() {
+    setFeedback(null);
+    setBannerBusy(true);
+    try {
+      await updateProfile({ bannerUrl: '' });
+      setFeedback({ kind: 'ok', text: 'Banner entfernt' });
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        text: err instanceof ApiError ? err.message : 'Server nicht erreichbar',
+      });
+    } finally {
+      setBannerBusy(false);
     }
   }
 
@@ -107,6 +146,54 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
             ← Zurück
           </button>
         )}
+        {/* Profil-Banner: Klick öffnet die Dateiauswahl, ✕ entfernt es. */}
+        <input
+          ref={bannerInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          data-testid="banner-input"
+          onChange={(e) => {
+            void onBannerSelected(e.target.files);
+            e.target.value = '';
+          }}
+        />
+        <div className="group relative mb-4 overflow-hidden rounded-xl">
+          <button
+            type="button"
+            title="Banner ändern"
+            disabled={bannerBusy}
+            onClick={() => bannerInputRef.current?.click()}
+            className="block w-full cursor-pointer disabled:opacity-60"
+            data-testid="banner-button"
+          >
+            {user.bannerUrl ? (
+              <img
+                src={user.bannerUrl}
+                alt=""
+                draggable={false}
+                className="h-24 w-full object-cover"
+              />
+            ) : (
+              <div className="h-24 w-full bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600" />
+            )}
+            <span className="absolute inset-0 flex items-center justify-center bg-black/60 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100">
+              {bannerBusy ? '…' : 'Banner ändern'}
+            </span>
+          </button>
+          {user.bannerUrl && (
+            <button
+              type="button"
+              title="Banner entfernen"
+              disabled={bannerBusy}
+              onClick={() => void onBannerRemove()}
+              className="absolute top-1.5 right-1.5 rounded bg-zinc-900/80 px-1.5 py-0.5 text-xs text-zinc-300 opacity-0 transition group-hover:opacity-100 hover:bg-red-900"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
         <div className="flex items-center gap-4">
           {/* Profilbild (Phase 15): Klick öffnet die Dateiauswahl. */}
           <input

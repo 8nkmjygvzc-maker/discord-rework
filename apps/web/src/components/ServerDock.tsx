@@ -47,10 +47,38 @@ export default function ServerDock({
   const [menuOpen, setMenuOpen] = useState(false);
   // Dock eingeblendet? Wird über die Mausposition (Zone unten mittig) gesteuert.
   const [visible, setVisible] = useState(false);
+  // Neue DM/Anfrage: Dock kurz zeigen + Zuhause-Icon „ploppen“ lassen.
+  const [peek, setPeek] = useState(false);
+  // Zähler statt Boolean: dient als `key` des Buttons, damit die CSS-Animation
+  // bei jeder neuen Nachricht frisch startet (auch in Hintergrund-Tabs, wo
+  // requestAnimationFrame pausiert – deshalb kein rAF-Neustart-Trick).
+  const [popSeq, setPopSeq] = useState(0);
+  const prevBadge = useRef(homeBadge);
+  const peekTimer = useRef<number | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
 
   const maxOffset = Math.max(0, servers.length - SLOTS);
+
+  // Badge gestiegen → Dock einige Sekunden einblenden und Icon animieren
+  // (Verbesserungs-Runde: sonst bliebe eine neue Nachricht unbemerkt, weil
+  // das Dock standardmäßig verborgen ist).
+  useEffect(() => {
+    if (homeBadge > prevBadge.current) {
+      setPeek(true);
+      setPopSeq((n) => n + 1);
+      if (peekTimer.current !== null) window.clearTimeout(peekTimer.current);
+      peekTimer.current = window.setTimeout(() => setPeek(false), 3_000);
+    }
+    prevBadge.current = homeBadge;
+  }, [homeBadge]);
+
+  useEffect(
+    () => () => {
+      if (peekTimer.current !== null) window.clearTimeout(peekTimer.current);
+    },
+    [],
+  );
 
   // Globale Mausverfolgung: einblenden, wenn der Cursor unten mittig ankommt;
   // ausblenden, sobald er das Dock-Areal wieder verlässt (außer Menü ist offen).
@@ -64,7 +92,7 @@ export default function ServerDock({
         setVisible(true);
         return;
       }
-      if (menuOpen) return;
+      if (menuOpen || peek) return;
       const rect = navRef.current?.getBoundingClientRect();
       const overDock =
         !!rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top - 8;
@@ -72,7 +100,7 @@ export default function ServerDock({
     }
     window.addEventListener('mousemove', onMouseMove);
     return () => window.removeEventListener('mousemove', onMouseMove);
-  }, [menuOpen]);
+  }, [menuOpen, peek]);
 
   // Fenster im gültigen Bereich halten, wenn Server wegfallen.
   useEffect(() => {
@@ -123,8 +151,11 @@ export default function ServerDock({
       onWheel={handleWheel}
       // Tastatur-Fokus (Tab) blendet das Dock ebenfalls ein.
       onFocusCapture={() => setVisible(true)}
-      className={`absolute bottom-0 left-1/2 z-40 -translate-x-1/2 px-8 pb-3 pt-4 transition-all duration-300 ease-out ${
-        visible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
+      // max-md:hidden – auf dem Handy wandert die Server-Leiste in den
+      // Navigations-Drawer (MobileServerRail in MainPage), das Hover-Dock
+      // funktioniert ohne Maus ohnehin nicht.
+      className={`absolute bottom-0 left-1/2 z-40 -translate-x-1/2 px-8 pt-4 pb-3 transition-all duration-300 ease-out max-md:hidden ${
+        visible || peek ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'
       }`}
       data-testid="server-dock"
     >
@@ -132,10 +163,11 @@ export default function ServerDock({
         {/* Obere Reihe: Freunde (fix) | 5 Server-Slots | Erstellen/Beitreten (fix) */}
         <div className="z-10 flex items-end gap-3">
           <button
+            key={popSeq}
             type="button"
             title="Freunde & Direktnachrichten"
             onClick={onSelectHome}
-            className={`relative ${circle} ${
+            className={`relative ${circle} ${popSeq > 0 ? 'animate-badge-pop' : ''} ${
               homeActive ? 'bg-indigo-600' : 'bg-zinc-700 hover:bg-indigo-500'
             }`}
             data-testid="home-button"

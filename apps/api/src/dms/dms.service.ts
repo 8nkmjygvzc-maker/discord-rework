@@ -105,6 +105,9 @@ export class DmsService {
             dmMembers: { include: { user: { select: publicUserSelect } } },
             // Aktive private Anrufe (Roster-Snapshot wie ServerDetails.voiceStates).
             voiceSessions: { include: { user: { select: { username: true } } } },
+            // Zeitstempel der jüngsten Nachricht – sortiert die DM-Liste nach
+            // Aktivität (neueste Unterhaltung zuerst).
+            messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
           },
         },
       },
@@ -118,11 +121,14 @@ export class DmsService {
               m.channel,
               toPublicUser(other.user),
               toVoiceStates(m.channel.voiceSessions),
+              m.channel.messages[0]?.createdAt,
             )
           : null;
       })
       .filter((c): c is DmChannelInfo => c !== null)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      .sort((a, b) =>
+        (b.lastMessageAt ?? b.createdAt).localeCompare(a.lastMessageAt ?? a.createdAt),
+      );
   }
 }
 
@@ -130,8 +136,15 @@ function toDmChannelInfo(
   channel: Channel,
   otherUser: PublicUser,
   voiceStates: VoiceState[],
+  lastMessageAt?: Date,
 ): DmChannelInfo {
-  return { id: channel.id, otherUser, createdAt: channel.createdAt.toISOString(), voiceStates };
+  return {
+    id: channel.id,
+    otherUser,
+    createdAt: channel.createdAt.toISOString(),
+    voiceStates,
+    lastMessageAt: lastMessageAt?.toISOString() ?? null,
+  };
 }
 
 function toVoiceStates(sessions: (VoiceSession & { user: { username: string } })[]): VoiceState[] {

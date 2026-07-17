@@ -19,7 +19,8 @@ import {
   mentionPermission,
   requestMentionPermission,
 } from '../lib/notifications';
-import { mentionsUser } from '../lib/mentions';
+import { findMentions, MentionKind, MentionTargets, mentionsMember } from '../lib/mentions';
+import { useUiStore } from '../store/ui';
 import MessageRow from './MessageRow';
 import { ApiError } from '../lib/api';
 
@@ -31,6 +32,15 @@ interface ChatViewProps {
 
 /** Deckel fürs Zitat-Nachladen (Phase 15): höchstens 10 Seiten à 50 Nachrichten. */
 const MAX_JUMP_PAGES = 10;
+
+/** Frühestens alle 4 s ein Tipp-Ping – der Server verteilt TYPING_START. */
+const TYPING_PING_INTERVAL_MS = 4_000;
+
+/** Serverseitiges Limit von notify-mentions (NotifyMentionsDto). */
+const MENTION_PUSH_CHUNK = 50;
+
+/** Höchstens so viele Vorschläge im @-Erwähnungs-Picker. */
+const MAX_MENTION_SUGGESTIONS = 8;
 
 /** Wartet zwei Frames – bis React nachgeladene Nachrichten gerendert hat. */
 function nextRender(): Promise<void> {
@@ -65,18 +75,45 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [flashId, setFlashId] = useState<string | null>(null);
   const [notifyState, setNotifyState] = useState<MentionPermission>(() => mentionPermission());
+  // @-Picker: Index des unterdrückten @ (Esc) und aktiver Vorschlag.
+  const [mentionSuppressedAt, setMentionSuppressedAt] = useState<number | null>(null);
+  const [mentionActiveIdx, setMentionActiveIdx] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const stickToBottom = useRef(true);
   const jumpBusy = useRef(false);
+  const lastTypingPing = useRef(0);
+  // Drag & Drop: Zähler statt Flag, weil dragenter/dragleave für jedes
+  // Kind-Element feuern – erst bei 0 verschwindet das Overlay wieder.
+  const dragDepth = useRef(0);
+  const [dragOver, setDragOver] = useState(false);
 
   const messages = chan?.messages ?? [];
 
-  /** Erwähnbare Namen: Server-Mitglieder bzw. die zwei DM-Teilnehmer. */
-  const knownUsernames = useMemo(() => {
-    if (dm) return user ? [channel.name, user.username] : [channel.name];
-    return members?.map((m) => m.username) ?? [];
-  }, [dm, channel.name, members, user]);
+  /** Erwähnbare Ziele: Mitglieder + Rollen + @everyone bzw. DM-Teilnehmer. */
+  const mentionTargets = useMemo<MentionTargets>(() => {
+    if (dm) {
+      return {
+        usernames: user ? [channel.name, user.username] : [channel.name],
+        roleNames: [],
+        everyone: false,
+      };
+    }
+    return {
+      usernames: members?.map((m) => m.username) ?? [],
+      // Die Standardrolle gilt für alle – dafür gibt es @everyone.
+      roleNames: roles?.filter((r) => !r.isDefault).map((r) => r.name) ?? [],
+      everyone: true,
+    };
+  }, [dm, channel.name, members, roles, user]);
+
+  /** Meine Rollennamen (gelbe Hervorhebung von Rollen-Erwähnungen). */
+  const myRoleNames = useMemo(() => {
+    if (dm || !members || !roles || !user) return [];
+    const mine = new Set(members.find((m) => m.userId === user.id)?.roleIds ?? []);
+    return roles.filter((r) => mine.has(r.id)).map((r) => r.name);
+  }, [dm, members, roles, user]);
 
   /** Rollenfarbe je Absender (höchste Rolle mit Farbe, Phase 15). */
   const senderColors = useMemo(() => {
@@ -102,6 +139,46 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     }
     return map;
   }, [dm, dmChannels, channel.id, members, user]);
+
+  /** Profilkarte des Absenders öffnen (Klick auf Avatar/Name). */
+  function showSenderProfile(senderId: string, senderUsername: string) {
+    const open = useUiStore.getState().openProfile;
+    if (user && senderId === user.id) {
+      open({
+        id: user.id,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+        bannerUrl: user.bannerUrl,
+        status: user.status,
+      });
+      return;
+    }
+    const dmOther = dm ? dmChannels.find((c) => c.id === channel.id)?.otherUser : undefined;
+    if (dmOther && dmOther.id === senderId) {
+      open({ ...dmOther });
+      return;
+    }
+    const member = members?.find((m) => m.userId === senderId);
+    if (member) {
+      open({
+        id: member.userId,
+        username: member.username,
+        nickname: member.nickname,
+        avatarUrl: member.avatarUrl,
+        bannerUrl: member.bannerUrl,
+        status: member.status,
+      });
+      return;
+    }
+    // Absender nicht (mehr) auflösbar (z. B. Server verlassen): Minimalkarte.
+    open({
+      id: senderId,
+      username: senderUsername,
+      avatarUrl: senderAvatars.get(senderId) ?? null,
+      bannerUrl: null,
+      status: '',
+    });
+  }
 
   // Reaktions-Events sind „Nachrichten“, gehören aber nicht in den Verlauf.
   const conversation = useMemo(
@@ -180,6 +257,10 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     setThreadRootId(null);
     setSearchOpen(false);
     setSearchQuery('');
+    setMentionSuppressedAt(null);
+    lastTypingPing.current = 0;
+    dragDepth.current = 0;
+    setDragOver(false);
   }, [channel.id]);
 
   // Sichtbare DM melden (Phase 15): löscht den Ungelesen-Zähler des Kanals
@@ -200,6 +281,39 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     const el = scrollRef.current;
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  // --- Drag & Drop (Quality-of-Life-Runde): Dateien in den Chat ziehen ------
+
+  /** Zieht der Nutzer gerade Dateien (und keinen markierten Text o. Ä.)? */
+  function draggingFiles(e: React.DragEvent) {
+    return Array.from(e.dataTransfer.types).includes('Files');
+  }
+
+  function onDragEnter(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    e.preventDefault(); // erlaubt das Ablegen
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    if (!canSend || !draggingFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    addFiles(e.dataTransfer.files);
   }
 
   function addFiles(selected: FileList | null) {
@@ -302,6 +416,37 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     });
   }
 
+  /**
+   * Erwähnte Mitglieder auflösen (Verbesserungs-Runde): direkte Nennungen,
+   * Rollen-Erwähnungen (alle Träger) und @everyone (alle Mitglieder).
+   */
+  function resolveMentionedUserIds(content: string): string[] {
+    if (dm || !members || !user) return [];
+    const ids = new Set<string>();
+    let everyone = false;
+    const roleNamesHit = new Set<string>();
+    for (const m of findMentions(content, mentionTargets)) {
+      if (m.kind === 'everyone') everyone = true;
+      else if (m.kind === 'role') roleNamesHit.add(m.name.toLowerCase());
+      else {
+        const member = members.find((x) => x.username.toLowerCase() === m.name.toLowerCase());
+        if (member) ids.add(member.userId);
+      }
+    }
+    if (everyone) {
+      for (const m of members) ids.add(m.userId);
+    } else if (roleNamesHit.size > 0) {
+      const roleIds = new Set(
+        (roles ?? []).filter((r) => roleNamesHit.has(r.name.toLowerCase())).map((r) => r.id),
+      );
+      for (const m of members) {
+        if (m.roleIds.some((id) => roleIds.has(id))) ids.add(m.userId);
+      }
+    }
+    ids.delete(user.id);
+    return [...ids];
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const content = draft.trim();
@@ -310,34 +455,36 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     setError(null);
     setSending(true);
     stickToBottom.current = true;
+    lastTypingPing.current = 0; // nach dem Senden darf sofort wieder gepingt werden
     try {
       await sendMessage(channel.id, content, files, replyTo ?? undefined);
       setFiles([]);
       setReplyTo(null);
       // Erwähnungs-Push (Phase 12): dem Server melden, WEN wir erwähnt haben –
       // er pusht die offline Erwähnten. Erwähnungen stecken im E2EE-Text, der
-      // Server kann sie nicht selbst erkennen. Nur in Server-Kanälen.
-      if (!dm && members && user && content) {
-        const mentioned = members
-          .filter((m) => m.userId !== user.id && mentionsUser(content, m.username))
-          .map((m) => m.userId);
-        if (mentioned.length > 0) {
-          void useAuthStore
-            .getState()
-            .authFetch<void>(`/api/channels/${channel.id}/notify-mentions`, {
-              method: 'POST',
-              body: { userIds: mentioned },
-            })
-            .catch(() => undefined);
-        }
+      // Server kann sie nicht selbst erkennen. Nur in Server-Kanälen; seit der
+      // Verbesserungs-Runde inkl. Rollen und @everyone (gestückelt, DTO-Limit).
+      const mentioned = content ? resolveMentionedUserIds(content) : [];
+      for (let i = 0; i < mentioned.length; i += MENTION_PUSH_CHUNK) {
+        void useAuthStore
+          .getState()
+          .authFetch<void>(`/api/channels/${channel.id}/notify-mentions`, {
+            method: 'POST',
+            body: { userIds: mentioned.slice(i, i + MENTION_PUSH_CHUNK) },
+          })
+          .catch(() => undefined);
       }
     } catch (err) {
       setError(
         err instanceof ApiError || err instanceof Error ? err.message : 'Senden fehlgeschlagen',
       );
-      setDraft(content); // Eingabe nicht verlieren
+      // Eingabe nicht verlieren – aber nichts überschreiben, was der Nutzer
+      // während des Sendens schon neu getippt hat.
+      setDraft((current) => current || content);
     } finally {
       setSending(false);
+      // Fokus im Eingabefeld behalten – direkt weiterschreiben können.
+      inputRef.current?.focus();
     }
   }
 
@@ -355,11 +502,105 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   };
   const activeCall = (callStates?.length ?? 0) > 0;
 
+  // --- „X schreibt …“ (Verbesserungs-Runde) --------------------------------
+  const typing = useMessagesStore((s) => s.typing[channel.id]);
+  const typingNames = useMemo(() => {
+    const now = Date.now();
+    return Object.values(typing ?? {})
+      .filter((t) => t.expiresAt > now)
+      .map((t) => t.username);
+  }, [typing]);
+
+  /** Tipp-Ping (gedrosselt) – der Server verteilt TYPING_START an die anderen. */
+  function pingTyping() {
+    if (!canSend || sending) return;
+    const now = Date.now();
+    if (now - lastTypingPing.current < TYPING_PING_INTERVAL_MS) return;
+    lastTypingPing.current = now;
+    void useAuthStore
+      .getState()
+      .authFetch<void>(`/api/channels/${channel.id}/typing`, { method: 'POST' })
+      .catch(() => undefined);
+  }
+
+  // --- @-Erwähnungs-Picker (Verbesserungs-Runde) ----------------------------
+  // Bezugspunkt ist das Ende des Entwurfs (dort tippt man beim Erwähnen);
+  // Rollennamen dürfen Leerzeichen enthalten, deshalb kein Wort-Regex.
+  const mentionContext = useMemo(() => {
+    if (!canSend) return null;
+    const at = draft.lastIndexOf('@');
+    if (at === -1) return null;
+    // Grenze davor („mail@…“ öffnet keinen Picker).
+    if (at > 0 && /[\p{L}\p{N}_.]/u.test(draft[at - 1])) return null;
+    const query = draft.slice(at + 1);
+    if (query.length > 32 || query.includes('\n')) return null;
+    return { at, query: query.toLowerCase() };
+  }, [draft, canSend]);
+
+  const mentionSuggestions = useMemo(() => {
+    if (!mentionContext || mentionContext.at === mentionSuppressedAt) return [];
+    const q = mentionContext.query;
+    const out: { kind: MentionKind; name: string; color?: string | null }[] = [];
+    if (mentionTargets.everyone && 'everyone'.startsWith(q)) {
+      out.push({ kind: 'everyone', name: 'everyone' });
+    }
+    for (const role of roles ?? []) {
+      if (!role.isDefault && role.name.toLowerCase().startsWith(q)) {
+        out.push({ kind: 'role', name: role.name, color: role.color });
+      }
+    }
+    for (const name of mentionTargets.usernames) {
+      if (name !== user?.username && name.toLowerCase().startsWith(q)) {
+        out.push({ kind: 'user', name });
+      }
+    }
+    return out.slice(0, MAX_MENTION_SUGGESTIONS);
+  }, [mentionContext, mentionSuppressedAt, mentionTargets, roles, user]);
+
+  // Auswahl zurücksetzen, wenn sich der Kontext ändert.
+  useEffect(() => {
+    setMentionActiveIdx(0);
+  }, [mentionContext?.at, mentionContext?.query]);
+
+  /** Vorschlag übernehmen: @Name + Leerzeichen ersetzt das angefangene @…. */
+  function pickMention(name: string) {
+    if (!mentionContext) return;
+    setDraft((current) => `${current.slice(0, mentionContext.at)}@${name} `);
+    inputRef.current?.focus();
+  }
+
   return (
-    <main className="animate-view-in flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <main
+      className="animate-view-in relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {/* Drop-Overlay: erscheint, sobald Dateien über dem Chat schweben. */}
+      {dragOver && (
+        <div
+          className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-indigo-400 bg-indigo-950/60"
+          data-testid="drop-overlay"
+        >
+          <p className="text-sm font-semibold text-indigo-200">
+            📎 Dateien hier ablegen – sie werden verschlüsselt angehängt
+          </p>
+        </div>
+      )}
       <header className="flex items-center gap-2 border-b border-zinc-950/50 px-4 py-3 shadow">
+        {/* Handy: Kanal-/DM-Sidebar als Drawer öffnen (md+: immer sichtbar). */}
+        <button
+          type="button"
+          title="Navigation anzeigen"
+          onClick={() => useUiStore.getState().toggleNav()}
+          className="-ml-1 rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700/50 md:hidden"
+          data-testid="nav-toggle"
+        >
+          ☰
+        </button>
         <span className="text-zinc-500">{dm ? '@' : '#'}</span>
-        <span className="font-semibold">{channel.name}</span>
+        <span className="min-w-0 truncate font-semibold">{channel.name}</span>
         {dm && !inThisCall && (
           <span className="ml-1 flex items-center gap-1">
             <button
@@ -386,7 +627,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
           className="ml-auto text-xs text-zinc-500"
           title="Nachrichten und Anhänge werden auf deinem Gerät ver- und entschlüsselt – der Server sieht nur Ciphertext."
         >
-          🔒 Ende-zu-Ende-verschlüsselt
+          🔒<span className="hidden sm:inline"> Ende-zu-Ende-verschlüsselt</span>
         </span>
         <button
           type="button"
@@ -426,8 +667,19 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Suchen …"
             data-testid="search-input"
-            className="w-44 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+            className="w-44 max-w-[40vw] rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
           />
+        )}
+        {!dm && (
+          <button
+            type="button"
+            title="Mitglieder anzeigen"
+            onClick={() => useUiStore.getState().toggleMembers()}
+            className="rounded px-1.5 py-0.5 text-sm text-zinc-400 hover:bg-zinc-700/50 md:hidden"
+            data-testid="members-toggle"
+          >
+            👥
+          </button>
         )}
       </header>
 
@@ -510,7 +762,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
               !!user &&
               msg.senderId !== user.id &&
               !!content &&
-              mentionsUser(content.text, user.username);
+              mentionsMember(content.text, mentionTargets, user.username, myRoleNames);
             return (
               <MessageRow
                 key={msg.id}
@@ -521,7 +773,8 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
                 mentionsMe={mentionsMe}
                 myUserId={user?.id ?? null}
                 myUsername={user?.username ?? null}
-                knownUsernames={knownUsernames}
+                mentionTargets={mentionTargets}
+                myRoleNames={myRoleNames}
                 reactionEvents={reactions[msg.id]}
                 canSend={canSend}
                 canManageMessages={canManageMessages}
@@ -529,6 +782,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
                 flash={flashId === msg.id}
                 senderColor={senderColors.get(msg.senderId) ?? null}
                 senderAvatarUrl={senderAvatars.get(msg.senderId) ?? null}
+                onShowProfile={() => showSenderProfile(msg.senderId, msg.senderUsername)}
                 onToggleReaction={(emoji, mine) => toggleReaction(msg.id, emoji, mine)}
                 onReply={() => startReply(msg.id)}
                 onOpenThread={() => setThreadRootId(msg.id)}
@@ -592,7 +846,51 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
         )}
         {/* Die UI blendet nur aus – blockiert wird serverseitig (403). */}
         {canSend ? (
-          <div className="flex items-center gap-2">
+          <div className="relative flex items-center gap-2">
+            {/* @-Erwähnungs-Picker: über der Eingabezeile, Pfeiltasten + Enter/Tab. */}
+            {mentionSuggestions.length > 0 && (
+              <div
+                className="animate-pop-in absolute bottom-full left-0 z-20 mb-2 w-full max-w-sm overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+                data-testid="mention-picker"
+              >
+                {mentionSuggestions.map((s, i) => (
+                  <button
+                    key={`${s.kind}|${s.name}`}
+                    type="button"
+                    // onMouseDown statt onClick: der Klick darf den Fokus nicht
+                    // aus dem Eingabefeld ziehen (blur käme vor click).
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickMention(s.name);
+                    }}
+                    onMouseEnter={() => setMentionActiveIdx(i)}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                      i === mentionActiveIdx ? 'bg-indigo-600/30 text-zinc-100' : 'text-zinc-300'
+                    }`}
+                  >
+                    {s.kind === 'role' ? (
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: s.color ?? '#71717a' }}
+                        aria-hidden
+                      />
+                    ) : (
+                      <span className="w-2.5 shrink-0 text-center text-zinc-500" aria-hidden>
+                        @
+                      </span>
+                    )}
+                    <span className="truncate font-medium">{s.name}</span>
+                    <span className="ml-auto shrink-0 text-xs text-zinc-500">
+                      {s.kind === 'everyone'
+                        ? 'alle Mitglieder'
+                        : s.kind === 'role'
+                          ? 'Rolle'
+                          : 'Mitglied'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -614,13 +912,31 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
               📎
             </button>
             <input
-              className="w-full rounded-lg border border-zinc-600 bg-zinc-900 px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
+              ref={inputRef}
+              // Bewusst NICHT disabled beim Senden: der Fokus bleibt erhalten
+              // und man kann sofort weiterschreiben (Verbesserungs-Runde).
+              className="w-full rounded-lg border border-zinc-600 bg-zinc-900 px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={
-                sending ? 'Wird gesendet …' : `Nachricht an ${dm ? '@' : '#'}${channel.name}`
-              }
-              disabled={sending}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                if (e.target.value.trim()) pingTyping();
+              }}
+              onKeyDown={(e) => {
+                if (mentionSuggestions.length === 0) return;
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  const delta = e.key === 'ArrowDown' ? 1 : -1;
+                  setMentionActiveIdx(
+                    (i) => (i + delta + mentionSuggestions.length) % mentionSuggestions.length,
+                  );
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  pickMention(mentionSuggestions[mentionActiveIdx].name);
+                } else if (e.key === 'Escape') {
+                  setMentionSuppressedAt(mentionContext?.at ?? null);
+                }
+              }}
+              placeholder={`Nachricht an ${dm ? '@' : '#'}${channel.name}`}
               maxLength={4000}
             />
           </div>
@@ -632,6 +948,19 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
             Du hast keine Berechtigung, in #{channel.name} zu schreiben.
           </p>
         )}
+        {/* „X schreibt …“ – feste Höhe, damit die Eingabezeile nicht springt. */}
+        <div className="h-5 px-1 pt-0.5 text-xs text-zinc-400" data-testid="typing-indicator">
+          {typingNames.length > 0 && (
+            <span className="animate-pulse">
+              ✏️{' '}
+              {typingNames.length === 1
+                ? `${typingNames[0]} schreibt …`
+                : typingNames.length === 2
+                  ? `${typingNames[0]} und ${typingNames[1]} schreiben …`
+                  : 'Mehrere Personen schreiben …'}
+            </span>
+          )}
+        </div>
       </form>
     </main>
   );

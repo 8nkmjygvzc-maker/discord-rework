@@ -32,6 +32,8 @@ interface ServersState {
   acceptInvite: (code: string) => Promise<void>;
   leaveServer: (serverId: string) => Promise<void>;
   deleteServer: (serverId: string) => Promise<void>;
+  /** Servereinstellungen (Verbesserungs-Runde): Name ändern, Icon entfernen (''). */
+  updateServer: (serverId: string, changes: { name?: string; iconUrl?: '' }) => Promise<void>;
   createChannel: (name: string, type?: 'TEXT' | 'VOICE') => Promise<void>;
   deleteChannel: (channelId: string) => Promise<void>;
 
@@ -142,6 +144,16 @@ export const useServersStore = create<ServersState>()((set, get) => ({
   deleteServer: async (serverId) => {
     await authFetch<void>(`/api/servers/${serverId}`, { method: 'DELETE' });
     get().handleGatewayEvent('SERVER_DELETE', { serverId } satisfies ServerDeletePayload);
+  },
+
+  updateServer: async (serverId, changes) => {
+    const server = await authFetch<ServerSummary>(`/api/servers/${serverId}`, {
+      method: 'PATCH',
+      body: changes,
+    });
+    // Kommt zusätzlich als SERVER_UPDATE-Event – hier direkt einspielen,
+    // damit der Bearbeitende nicht auf das Gateway warten muss.
+    get().handleGatewayEvent('SERVER_UPDATE', { server });
   },
 
   createChannel: async (name, type = 'TEXT') => {
@@ -335,7 +347,12 @@ export const useServersStore = create<ServersState>()((set, get) => ({
                   ...s.selectedServer,
                   members: s.selectedServer.members.map((m) =>
                     m.userId === user.id
-                      ? { ...m, avatarUrl: user.avatarUrl, status: user.status }
+                      ? {
+                          ...m,
+                          avatarUrl: user.avatarUrl,
+                          bannerUrl: user.bannerUrl,
+                          status: user.status,
+                        }
                       : m,
                   ),
                 },

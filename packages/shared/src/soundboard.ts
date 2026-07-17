@@ -14,21 +14,15 @@
  * inhalte (Trade-off in ROADMAP.md dokumentiert).
  */
 
-/** Obergrenze pro Audiodatei. Die ANZAHL der Sounds pro Server ist unbegrenzt. */
-export const MAX_SOUNDBOARD_SOUND_BYTES = 1024 * 1024; // 1 MiB
+/**
+ * Obergrenze pro Audiodatei (Quality-of-Life-Runde: von 1 auf 10 MiB
+ * angehoben, gleiche Grenze wie Anhänge – mehr passt nicht durch den
+ * Raw-Body-Parser der API). Eine DAUER-Grenze gibt es nicht mehr; die ANZAHL
+ * der Sounds pro Server war schon immer unbegrenzt.
+ */
+export const MAX_SOUNDBOARD_SOUND_BYTES = 10 * 1024 * 1024;
 
 export const MAX_SOUNDBOARD_NAME_LENGTH = 32;
-
-/** Ehrliche Clients prüfen die Dauer VOR dem Upload (dekodieren die Datei). */
-export const MAX_SOUNDBOARD_UPLOAD_SECONDS = 10;
-
-/**
- * Harte Wiedergabe-Obergrenze beim EMPFÄNGER. Der Server kann die Dauer eines
- * Blobs nicht ohne Audio-Dekodierung prüfen (nur die Größe) – dieser Deckel
- * neutralisiert manipulierte Uploads (z. B. lange Niedrig-Bitraten-Dateien):
- * Egal was hochgeladen wurde, kein Client spielt länger als diese Frist ab.
- */
-export const MAX_SOUNDBOARD_PLAY_SECONDS = 12;
 
 /** Ein Sound der Server-Bibliothek, wie die API ihn ausliefert. */
 export interface SoundboardSoundInfo {

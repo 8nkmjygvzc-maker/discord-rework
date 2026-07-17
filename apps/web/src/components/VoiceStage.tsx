@@ -13,10 +13,29 @@ import type { VideoTile } from '../lib/voice';
  * (Fokus-Ansicht); ein Klick auf die große Kachel löst den Pin wieder.
  * Ohne Bildschirmfreigabe und ohne Pin: das bisherige Kachel-Raster.
  * Wer gerade spricht, bekommt einen grünen Ring um seine Kachel.
+ *
+ * Verbesserungs-Runde: Die Fokus-Kachel ist über einen Zieh-Griff unter der
+ * Bühne in der Höhe verstellbar, und jede Kachel hat einen Vollbild-Button
+ * (Fullscreen-API) – wichtig für Bildschirmfreigaben.
  */
+
+/** Grenzen für die verstellbare Höhe der Fokus-Kachel. */
+const MIN_FOCUS_HEIGHT = 140;
+const MAX_FOCUS_HEIGHT_RATIO = 0.8;
+
+function clampFocusHeight(px: number): number {
+  return Math.min(
+    Math.round(window.innerHeight * MAX_FOCUS_HEIGHT_RATIO),
+    Math.max(MIN_FOCUS_HEIGHT, px),
+  );
+}
+
 export default function VoiceStage() {
   const videoTiles = useVoiceStore((s) => s.videoTiles);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
+  // Höhe der Fokus-Kachel (vorher fix 40vh) – per Griff verstellbar.
+  const [focusHeight, setFocusHeight] = useState(() => clampFocusHeight(window.innerHeight * 0.4));
+  const dragStart = useRef<{ y: number; height: number } | null>(null);
 
   // Angepinnte Kachel verschwunden (Stream/Teilnehmer weg) → Pin lösen.
   useEffect(() => {
@@ -35,11 +54,12 @@ export default function VoiceStage() {
   if (focused) {
     const others = videoTiles.filter((t) => t.id !== focused.id);
     return (
-      <div className="shrink-0 border-b border-zinc-950/50 bg-black/40 p-3">
+      <div className="shrink-0 border-b border-zinc-950/50 bg-black/40 p-3 pb-1">
         <VideoTileView
           tile={focused}
           mode="focus"
           pinned={pinned !== null}
+          focusHeight={focusHeight}
           onClick={() => setPinnedId(pinned ? null : focused.id)}
         />
         {others.length > 0 && (
@@ -55,6 +75,30 @@ export default function VoiceStage() {
             ))}
           </div>
         )}
+        {/* Zieh-Griff: Höhe der Fokus-Kachel anpassen (Verbesserungs-Runde). */}
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title="Ziehen, um die Videogröße anzupassen"
+          data-testid="stage-resize-handle"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            dragStart.current = { y: e.clientY, height: focusHeight };
+          }}
+          onPointerMove={(e) => {
+            if (!dragStart.current) return;
+            setFocusHeight(
+              clampFocusHeight(dragStart.current.height + (e.clientY - dragStart.current.y)),
+            );
+          }}
+          onPointerUp={() => {
+            dragStart.current = null;
+          }}
+          className="group mt-1 flex h-3 cursor-row-resize touch-none items-center justify-center"
+        >
+          <div className="h-1 w-16 rounded-full bg-zinc-600/60 transition group-hover:bg-zinc-400" />
+        </div>
       </div>
     );
   }
@@ -86,14 +130,18 @@ function VideoTileView({
   tile,
   mode,
   pinned,
+  focusHeight,
   onClick,
 }: {
   tile: VideoTile;
   mode: 'grid' | 'focus' | 'thumb';
   pinned: boolean;
+  /** Nur im focus-Modus gesetzt: verstellbare Höhe in px. */
+  focusHeight?: number;
   onClick: () => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const speaking = useVoiceStore((s) => s.speaking[tile.userId] === true);
 
   useEffect(() => {
@@ -105,19 +153,27 @@ function VideoTileView({
     };
   }, [tile.track]);
 
+  /** Vollbild für diese Kachel togglen (Verbesserungs-Runde). */
+  function toggleFullscreen() {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) {
+      void document.exitFullscreen().catch(() => undefined);
+    } else {
+      void el.requestFullscreen().catch(() => undefined);
+    }
+  }
+
   const name = tile.isLocal ? 'Du' : tile.username;
   // In der Thumbnail-Leiste nur der Name – für den Rest fehlt der Platz.
   const label =
     mode === 'thumb' ? name : `${name}${tile.source === 'screen' ? ' · Bildschirm' : ' · Kamera'}`;
   const sizing =
-    mode === 'focus'
-      ? 'h-[40vh] w-full'
-      : mode === 'thumb'
-        ? 'aspect-video h-20 shrink-0'
-        : 'aspect-video';
+    mode === 'focus' ? 'w-full' : mode === 'thumb' ? 'aspect-video h-20 shrink-0' : 'aspect-video';
 
   return (
     <div
+      ref={containerRef}
       role="button"
       tabIndex={0}
       title={mode === 'focus' ? (pinned ? 'Fokus lösen' : 'Kachel anpinnen') : 'Kachel fokussieren'}
@@ -128,7 +184,8 @@ function VideoTileView({
           onClick();
         }
       }}
-      className={`relative cursor-pointer overflow-hidden rounded-lg bg-zinc-900 ${sizing} ${
+      style={mode === 'focus' ? { height: focusHeight } : undefined}
+      className={`group/tile relative cursor-pointer overflow-hidden rounded-lg bg-zinc-900 ${sizing} ${
         speaking ? 'ring-2 ring-emerald-400' : 'ring-1 ring-zinc-800'
       }`}
     >
@@ -147,6 +204,21 @@ function VideoTileView({
         {pinned && mode === 'focus' ? '📌 ' : ''}
         {tile.source === 'screen' ? '🖥️' : '📹'} {label}
       </span>
+      {/* Vollbild – in der Thumbnail-Leiste fehlt der Platz. */}
+      {mode !== 'thumb' && (
+        <button
+          type="button"
+          title="Vollbild"
+          data-testid="tile-fullscreen"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+          }}
+          className="absolute top-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-sm text-zinc-200 opacity-0 transition group-hover/tile:opacity-100 hover:bg-black/80 focus:opacity-100"
+        >
+          ⛶
+        </button>
+      )}
     </div>
   );
 }

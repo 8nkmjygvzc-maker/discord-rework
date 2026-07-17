@@ -135,6 +135,49 @@ export const MAX_REACTION_EMOJI_LENGTH = 32;
 export const MAX_REPLY_PREVIEW_LENGTH = 160;
 
 /**
+ * Link-Vorschau (Embed, Phase „Feinschliff"): Titel/Beschreibung/Bild einer
+ * verlinkten Seite. Der Absender holt diese Metadaten beim Senden über den
+ * Server-`/unfurl`-Endpunkt (Browser-CORS lässt den fremden HTML-Abruf nicht
+ * direkt zu) und legt sie – wie Anhänge – IN den E2EE-Klartext. Der Server
+ * sieht die Vorschau NICHT (nur beim einmaligen Unfurl transient die URL).
+ *
+ * Bewusster Trade-off (ROADMAP): `imageUrl` zeigt auf den fremden Host –
+ * beim Rendern lädt der LESER-Browser das Bild direkt, dessen IP wird also an
+ * den Host geleakt. Discord proxyt das serverseitig; hier bewusst einfacher.
+ */
+export interface LinkEmbed {
+  /** Verlinkte Seite (Klick-Ziel der Karte) – immer http(s). */
+  url: string;
+  title?: string;
+  description?: string;
+  /** Vorschaubild – immer http(s); wird vom Leser-Browser direkt geladen. */
+  imageUrl?: string;
+  /** Seitenname (og:site_name), z. B. „YouTube". */
+  siteName?: string;
+}
+
+export const MAX_EMBEDS_PER_MESSAGE = 4;
+export const MAX_EMBED_URL_LENGTH = 2048;
+export const MAX_EMBED_TITLE_LENGTH = 300;
+export const MAX_EMBED_DESCRIPTION_LENGTH = 500;
+export const MAX_EMBED_SITENAME_LENGTH = 100;
+
+/**
+ * Nur explizite http(s)-URLs (kein `javascript:`/`data:`/…). Bewusst ohne
+ * globales `URL`, damit die Prüfung in Browser UND Node identisch läuft.
+ */
+const HTTP_URL_PATTERN = /^https?:\/\/[^\s]+$/i;
+
+function isHttpUrlString(value: unknown, maxLength: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    HTTP_URL_PATTERN.test(value)
+  );
+}
+
+/**
  * Absenderkontrollierte Nachrichten-Referenzen (replyTo/Reaktions-Ziel) müssen
  * wie Server-IDs aussehen (UUID-Zeichenvorrat) – alles andere wird verworfen.
  * Verhindert u. a. Selector-Injektion, wenn die UI per ID Elemente sucht.
@@ -162,6 +205,8 @@ export interface MessageContentV1 {
   replyTo?: ReplyRef;
   /** Wenn gesetzt, ist diese Nachricht ein Reaktions-Event (text bleibt leer). */
   reaction?: ReactionContent;
+  /** Link-Vorschau-Karten zu den URLs im Text (Feinschliff). */
+  embeds?: LinkEmbed[];
 }
 
 export interface DecodedMessageContent {
@@ -169,6 +214,7 @@ export interface DecodedMessageContent {
   attachments: AttachmentMeta[];
   replyTo: ReplyRef | null;
   reaction: ReactionContent | null;
+  embeds: LinkEmbed[];
 }
 
 /** Baut den zu verschlüsselnden Klartext (immer JSON, Version 1). */
@@ -176,6 +222,7 @@ export function encodeMessageContent(
   text: string,
   attachments: AttachmentMeta[] = [],
   replyTo?: ReplyRef,
+  embeds: LinkEmbed[] = [],
 ): string {
   const content: MessageContentV1 = {
     v: 1,
@@ -184,6 +231,7 @@ export function encodeMessageContent(
     ...(replyTo
       ? { replyTo: { ...replyTo, preview: replyTo.preview.slice(0, MAX_REPLY_PREVIEW_LENGTH) } }
       : {}),
+    ...(embeds.length > 0 ? { embeds: embeds.slice(0, MAX_EMBEDS_PER_MESSAGE) } : {}),
   };
   return JSON.stringify(content);
 }
@@ -218,13 +266,56 @@ export function decodeMessageContent(plaintext: string): DecodedMessageContent {
           attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
           replyTo: sanitizeReplyRef(parsed.replyTo),
           reaction: sanitizeReaction(parsed.reaction),
+          embeds: sanitizeEmbeds(parsed.embeds),
         };
       }
     } catch {
       // kein JSON → Rohtext aus einer früheren Phase
     }
   }
-  return { text: plaintext, attachments: [], replyTo: null, reaction: null };
+  return { text: plaintext, attachments: [], replyTo: null, reaction: null, embeds: [] };
+}
+
+/**
+ * Link-Vorschauen stammen vom (nur signierten, nicht vertrauenswürdigen)
+ * Absender – defensiv validieren: `url`/`imageUrl` müssen http(s) sein (kein
+ * `javascript:`/`data:`), Texte werden geklemmt, Anzahl gedeckelt. Eine Karte
+ * ohne jeden Inhalt (nur url) wird verworfen.
+ */
+function sanitizeEmbeds(value: unknown): LinkEmbed[] {
+  if (!Array.isArray(value)) return [];
+  const embeds: LinkEmbed[] = [];
+  for (const raw of value) {
+    if (embeds.length >= MAX_EMBEDS_PER_MESSAGE) break;
+    if (typeof raw !== 'object' || raw === null) continue;
+    const candidate = raw as Partial<LinkEmbed>;
+    if (!isHttpUrlString(candidate.url, MAX_EMBED_URL_LENGTH)) continue;
+    const embed: LinkEmbed = { url: candidate.url };
+    if (typeof candidate.title === 'string' && candidate.title.length > 0) {
+      embed.title = candidate.title.slice(0, MAX_EMBED_TITLE_LENGTH);
+    }
+    if (typeof candidate.description === 'string' && candidate.description.length > 0) {
+      embed.description = candidate.description.slice(0, MAX_EMBED_DESCRIPTION_LENGTH);
+    }
+    if (typeof candidate.siteName === 'string' && candidate.siteName.length > 0) {
+      embed.siteName = candidate.siteName.slice(0, MAX_EMBED_SITENAME_LENGTH);
+    }
+    if (isHttpUrlString(candidate.imageUrl, MAX_EMBED_URL_LENGTH)) {
+      embed.imageUrl = candidate.imageUrl;
+    }
+    if (embed.title || embed.description || embed.imageUrl) embeds.push(embed);
+  }
+  return embeds;
+}
+
+/** Anfrage an POST /api/unfurl – der Server holt die Vorschau-Metadaten. */
+export interface UnfurlRequest {
+  url: string;
+}
+
+/** Antwort von POST /api/unfurl: gefundene Vorschau oder null. */
+export interface UnfurlResponse {
+  embed: LinkEmbed | null;
 }
 
 function sanitizeReplyRef(value: unknown): ReplyRef | null {

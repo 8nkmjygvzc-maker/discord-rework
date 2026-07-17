@@ -6,6 +6,8 @@ export interface PublicUser {
   id: string;
   username: string;
   avatarUrl: string | null;
+  /** Profil-Banner (Querformat) für die Profilkarte, null = Farbverlauf. */
+  bannerUrl: string | null;
   status: string;
 }
 
@@ -40,6 +42,8 @@ export interface DmChannelInfo {
   createdAt: string;
   /** Aktiver privater Anruf in diesem DM-Kanal (Roster wie bei Sprachkanälen). */
   voiceStates: VoiceState[];
+  /** Zeitstempel der letzten Nachricht (null = noch keine) – sortiert die DM-Liste. */
+  lastMessageAt: string | null;
 }
 
 /** Body von POST /api/dms – öffnet (oder findet) den DM-Kanal zu einem Nutzer. */

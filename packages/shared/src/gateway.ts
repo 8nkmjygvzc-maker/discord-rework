@@ -51,6 +51,9 @@ export type GatewayEventType =
   | 'CHANNEL_DELETE'
   // Phase 4 – Text-Chat:
   | 'MESSAGE_CREATE'
+  // Verbesserungs-Runde: „X schreibt …“ – an dieselben Empfänger wie
+  // MESSAGE_CREATE (ohne den Tippenden selbst), Anzeige verfällt clientseitig.
+  | 'TYPING_START'
   // Phase 13 – Nachricht bearbeitet bzw. gelöscht (an dieselben Empfänger
   // wie MESSAGE_CREATE: Server-Mitglieder mit ViewChannels bzw. DM-Partner).
   | 'MESSAGE_UPDATE'
@@ -130,12 +133,13 @@ export interface PresenceUpdatePayload {
   online: boolean;
 }
 
-/** Profilaktualisierung (Status/Avatar, Phase 15) – Form wie PublicUser. */
+/** Profilaktualisierung (Status/Avatar/Banner, Phase 15) – Form wie PublicUser. */
 export interface UserUpdatePayload {
   user: {
     id: string;
     username: string;
     avatarUrl: string | null;
+    bannerUrl: string | null;
     status: string;
   };
 }
@@ -160,6 +164,17 @@ export interface ServerMemberRemovePayload {
 export interface ChannelDeletePayload {
   serverId: string;
   channelId: string;
+}
+
+/**
+ * „X schreibt …“ (Verbesserungs-Runde). Der Server kennt keinen Tipp-INHALT –
+ * nur das Metadatum, DASS jemand im Kanal tippt (wie bei Discord). Clients
+ * blenden die Anzeige nach wenigen Sekunden ohne neues Event wieder aus.
+ */
+export interface TypingStartPayload {
+  channelId: string;
+  userId: string;
+  username: string;
 }
 
 // --- Payloads der Moderations-Events (Phase 13) ---

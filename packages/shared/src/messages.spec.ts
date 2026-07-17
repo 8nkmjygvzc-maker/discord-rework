@@ -4,9 +4,12 @@ import {
   encodeMessageContent,
   encodeReactionContent,
   isPlausibleReactionEmoji,
+  MAX_EMBED_TITLE_LENGTH,
+  MAX_EMBEDS_PER_MESSAGE,
   MAX_REACTION_EMOJI_LENGTH,
   MAX_REPLY_PREVIEW_LENGTH,
 } from './messages';
+import type { LinkEmbed } from './messages';
 
 describe('Nachrichten-Inhaltsformat (Phase 8/9)', () => {
   it('kodiert und dekodiert Text mit Anhängen', () => {
@@ -31,6 +34,7 @@ describe('Nachrichten-Inhaltsformat (Phase 8/9)', () => {
       attachments: [],
       replyTo: null,
       reaction: null,
+      embeds: [],
     });
     // Auch krumme JSON-ähnliche Texte fallen sauber auf Rohtext zurück.
     expect(decodeMessageContent('{kein json').text).toBe('{kein json');
@@ -113,5 +117,51 @@ describe('Nachrichten-Inhaltsformat (Phase 8/9)', () => {
       reaction: { targetMessageId: 'm1', emoji: 'LOL!', action: 'add' },
     });
     expect(decodeMessageContent(textAsEmoji).reaction).toBeNull();
+  });
+
+  it('kodiert und dekodiert Link-Vorschauen (Embeds)', () => {
+    const embed: LinkEmbed = {
+      url: 'https://example.com/artikel',
+      title: 'Ein Titel',
+      description: 'Kurze Beschreibung',
+      imageUrl: 'https://cdn.example.com/bild.png',
+      siteName: 'Example',
+    };
+    const decoded = decodeMessageContent(encodeMessageContent('schau mal', [], undefined, [embed]));
+    expect(decoded.text).toBe('schau mal');
+    expect(decoded.embeds).toEqual([embed]);
+  });
+
+  it('verwirft Embeds mit unsicherer URL und klemmt Textlängen', () => {
+    const raw = JSON.stringify({
+      v: 1,
+      text: 'hi',
+      embeds: [
+        // javascript:-URL → komplett verworfen
+        { url: 'javascript:alert(1)', title: 'böse' },
+        // gültige Seite, aber data:-Bild → Bild fällt weg, Titel wird geklemmt
+        {
+          url: 'https://ok.example/seite',
+          title: 'T'.repeat(MAX_EMBED_TITLE_LENGTH + 50),
+          imageUrl: 'data:image/png;base64,AAAA',
+        },
+        // reine URL ohne jeden Inhalt → keine Karte
+        { url: 'https://leer.example' },
+      ],
+    });
+    const decoded = decodeMessageContent(raw);
+    expect(decoded.embeds).toHaveLength(1);
+    expect(decoded.embeds[0].url).toBe('https://ok.example/seite');
+    expect(decoded.embeds[0].imageUrl).toBeUndefined();
+    expect(decoded.embeds[0].title).toHaveLength(MAX_EMBED_TITLE_LENGTH);
+  });
+
+  it('deckelt die Anzahl der Embeds', () => {
+    const many = Array.from({ length: MAX_EMBEDS_PER_MESSAGE + 3 }, (_, i) => ({
+      url: `https://example.com/${i}`,
+      title: `Titel ${i}`,
+    }));
+    const decoded = decodeMessageContent(JSON.stringify({ v: 1, text: '', embeds: many }));
+    expect(decoded.embeds).toHaveLength(MAX_EMBEDS_PER_MESSAGE);
   });
 });

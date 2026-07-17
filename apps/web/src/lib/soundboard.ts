@@ -1,15 +1,10 @@
 /**
  * Soundboard-Wiedergabe (Client-Seite). Audio-Blobs werden pro Sound-ID als
  * Object-URL gecacht (gleiches Prinzip wie die Anhänge in lib/attachments.ts).
- * Die Wiedergabe ist hart auf MAX_SOUNDBOARD_PLAY_SECONDS gedeckelt – der
- * Server prüft nur die Dateigröße, nicht die Dauer; ohne den Deckel könnte
- * eine manipulierte (überlange Niedrig-Bitraten-)Datei den Kanal beschallen.
+ * Eine Dauer-Grenze gibt es seit der Quality-of-Life-Runde nicht mehr –
+ * nur die Dateigröße ist gedeckelt (serverseitig geprüft).
  */
-import {
-  MAX_SOUNDBOARD_PLAY_SECONDS,
-  MAX_SOUNDBOARD_UPLOAD_SECONDS,
-  SoundboardSoundInfo,
-} from '@parley/shared';
+import { SoundboardSoundInfo } from '@parley/shared';
 import { useAuthStore } from '../store/auth';
 import { useSettingsStore } from '../store/settings';
 
@@ -44,30 +39,18 @@ function getSoundObjectUrl(sound: Pick<SoundboardSoundInfo, 'id' | 'mimeType'>):
   return pending;
 }
 
-/** Spielt einen Soundboard-Sound lokal ab (Lautstärke geklemmt, Dauer gedeckelt). */
+/** Spielt einen Soundboard-Sound lokal ab (Lautstärke geklemmt). */
 export async function playSoundboardSound(sound: SoundboardSoundInfo): Promise<void> {
   const url = await getSoundObjectUrl(sound);
   const audio = new Audio(url);
   const entry = { el: audio, baseVolume: Math.min(1, Math.max(0, sound.volume)) };
   applyVolume(entry);
   playingAudios.add(entry);
-  const stopper = setTimeout(() => {
-    audio.pause();
-    playingAudios.delete(entry);
-  }, MAX_SOUNDBOARD_PLAY_SECONDS * 1000);
-  audio.addEventListener(
-    'ended',
-    () => {
-      clearTimeout(stopper);
-      playingAudios.delete(entry);
-    },
-    { once: true },
-  );
+  audio.addEventListener('ended', () => playingAudios.delete(entry), { once: true });
   try {
     await audio.play();
   } catch {
     // Autoplay-Policy o. Ä. – Sounds sind nice-to-have und blockieren nichts.
-    clearTimeout(stopper);
     playingAudios.delete(entry);
   }
 }
@@ -82,23 +65,16 @@ export function resetSoundboardCache(): void {
 
 /**
  * Validiert eine Datei VOR dem Upload: Der Browser muss sie dekodieren können
- * und die Dauer darf MAX_SOUNDBOARD_UPLOAD_SECONDS nicht überschreiten.
- * Wirft mit verständlicher Meldung, sonst kommt die Dauer zurück.
+ * (eine Dauer-Grenze gibt es nicht mehr). Wirft mit verständlicher Meldung,
+ * sonst kommt die Dauer zurück.
  */
 export async function probeUploadableAudio(file: File): Promise<number> {
-  let duration: number;
   try {
     // OfflineAudioContext dekodiert ohne hörbare Ausgabe und ohne Nutzer-Geste.
     const ctx = new OfflineAudioContext(1, 1, 44100);
     const decoded = await ctx.decodeAudioData(await file.arrayBuffer());
-    duration = decoded.duration;
+    return decoded.duration;
   } catch {
     throw new Error(`„${file.name}“ ist keine abspielbare Audiodatei`);
   }
-  if (duration > MAX_SOUNDBOARD_UPLOAD_SECONDS) {
-    throw new Error(
-      `„${file.name}“ ist ${duration.toFixed(1)} s lang – erlaubt sind max. ${MAX_SOUNDBOARD_UPLOAD_SECONDS} s`,
-    );
-  }
-  return duration;
 }

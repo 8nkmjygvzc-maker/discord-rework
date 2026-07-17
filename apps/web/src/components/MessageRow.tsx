@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import type { DecodedMessageContent, MessageInfo } from '@parley/shared';
+import type { DecodedMessageContent, LinkEmbed, MessageInfo } from '@parley/shared';
 import type { ReactionEventState } from '../store/messages';
-import { splitMentions } from '../lib/mentions';
+import { MentionTargets, splitMentions } from '../lib/mentions';
 import { splitLinks } from '../lib/links';
 import AttachmentView from './AttachmentView';
 import Avatar from './Avatar';
@@ -25,8 +25,10 @@ interface MessageRowProps {
   isOwn: boolean;
   mentionsMe: boolean;
   myUserId: string | null;
-  /** Benutzernamen des Kanals – nur bekannte Namen werden als Erwähnung markiert. */
-  knownUsernames: string[];
+  /** Bekannte Nutzer-/Rollennamen des Kanals – nur die werden markiert. */
+  mentionTargets: MentionTargets;
+  /** Meine Rollennamen (für die gelbe Hervorhebung von Rollen-Erwähnungen). */
+  myRoleNames: string[];
   myUsername: string | null;
   /** Rohe Reaktions-Events auf diese Nachricht (Aggregation passiert hier). */
   reactionEvents: Record<string, ReactionEventState> | undefined;
@@ -44,6 +46,8 @@ interface MessageRowProps {
   senderColor: string | null;
   /** Profilbild des Absenders (Phase 15) – null = Initialen-Platzhalter. */
   senderAvatarUrl: string | null;
+  /** Klick auf Avatar/Name → Profilkarte des Absenders. */
+  onShowProfile: () => void;
   onToggleReaction: (emoji: string, mine: boolean) => void;
   onReply: () => void;
   onOpenThread: () => void;
@@ -61,7 +65,8 @@ export default function MessageRow({
   isOwn,
   mentionsMe,
   myUserId,
-  knownUsernames,
+  mentionTargets,
+  myRoleNames,
   myUsername,
   reactionEvents,
   canSend,
@@ -70,6 +75,7 @@ export default function MessageRow({
   flash,
   senderColor,
   senderAvatarUrl,
+  onShowProfile,
   onToggleReaction,
   onReply,
   onOpenThread,
@@ -144,18 +150,28 @@ export default function MessageRow({
     >
       <div className="w-9 shrink-0">
         {!grouped && (
-          <Avatar name={message.senderUsername} avatarUrl={senderAvatarUrl} sizeClass="h-9 w-9" />
+          <button
+            type="button"
+            title={`Profil von ${message.senderUsername} ansehen`}
+            onClick={onShowProfile}
+            className="cursor-pointer rounded-full transition hover:brightness-110"
+          >
+            <Avatar name={message.senderUsername} avatarUrl={senderAvatarUrl} sizeClass="h-9 w-9" />
+          </button>
         )}
       </div>
       <div className="min-w-0 flex-1">
         {!grouped && (
           <p className="text-sm">
-            <span
-              className={`font-semibold ${isOwn ? 'text-indigo-400' : 'text-zinc-200'}`}
+            <button
+              type="button"
+              title={`Profil von ${message.senderUsername} ansehen`}
+              onClick={onShowProfile}
+              className={`cursor-pointer font-semibold hover:underline ${isOwn ? 'text-indigo-400' : 'text-zinc-200'}`}
               style={senderColor ? { color: senderColor } : undefined}
             >
               {message.senderUsername}
-            </span>
+            </button>
             <span className="ml-2 text-xs text-zinc-500">
               {new Date(message.createdAt).toLocaleString('de-DE', {
                 day: '2-digit',
@@ -220,12 +236,16 @@ export default function MessageRow({
               (content.text || message.editedAt) && (
                 <MentionText
                   text={content.text}
-                  knownUsernames={knownUsernames}
+                  targets={mentionTargets}
+                  myRoleNames={myRoleNames}
                   myUsername={myUsername}
                   edited={!!message.editedAt}
                 />
               )
             )}
+            {content.embeds.map((embed, i) => (
+              <EmbedCard key={i} embed={embed} />
+            ))}
             {content.attachments.map((meta) => (
               <AttachmentView key={meta.id} meta={meta} />
             ))}
@@ -344,44 +364,87 @@ export default function MessageRow({
   );
 }
 
-/** Text mit hervorgehobenen @Erwähnungen (nur bekannte Benutzernamen). */
+/** Text mit hervorgehobenen @Erwähnungen (Nutzer, Rollen, @everyone). */
 function MentionText({
   text,
-  knownUsernames,
+  targets,
+  myRoleNames,
   myUsername,
   edited,
 }: {
   text: string;
-  knownUsernames: string[];
+  targets: MentionTargets;
+  myRoleNames: string[];
   myUsername: string | null;
   /** Zeigt einen dezenten „(bearbeitet)“-Hinweis (Phase 13). */
   edited?: boolean;
 }) {
-  const segments = useMemo(() => splitMentions(text, knownUsernames), [text, knownUsernames]);
+  const segments = useMemo(() => splitMentions(text, targets), [text, targets]);
+  const myRoles = useMemo(() => new Set(myRoleNames.map((r) => r.toLowerCase())), [myRoleNames]);
   return (
     <p className="text-sm break-words whitespace-pre-wrap text-zinc-300">
-      {segments.map((segment, i) =>
-        segment.mention ? (
+      {segments.map((segment, i) => {
+        if (!segment.mention) return <LinkifiedText key={i} text={segment.text} />;
+        const { kind, name } = segment.mention;
+        // Gelb, wenn die Erwähnung MICH trifft (direkt, eigene Rolle, alle).
+        const hitsMe =
+          kind === 'everyone' ||
+          (kind === 'user' && !!myUsername && name.toLowerCase() === myUsername.toLowerCase()) ||
+          (kind === 'role' && myRoles.has(name.toLowerCase()));
+        return (
           <span
             key={i}
             className={`rounded px-0.5 font-medium ${
-              myUsername && segment.mention.toLowerCase() === myUsername.toLowerCase()
-                ? 'bg-yellow-500/30 text-yellow-200'
-                : 'bg-indigo-500/20 text-indigo-300'
+              hitsMe ? 'bg-yellow-500/30 text-yellow-200' : 'bg-indigo-500/20 text-indigo-300'
             }`}
           >
             {segment.text}
           </span>
-        ) : (
-          <LinkifiedText key={i} text={segment.text} />
-        ),
-      )}
+        );
+      })}
       {edited && (
         <span className="ml-1 text-[10px] text-zinc-500" title="Diese Nachricht wurde bearbeitet">
           (bearbeitet)
         </span>
       )}
     </p>
+  );
+}
+
+/**
+ * Link-Vorschau-Karte (Embed, Feinschliff). Die Felder sind absenderkontrolliert,
+ * aber beim Dekodieren schon defensiv geprüft (`url`/`imageUrl` sind http(s),
+ * Texte geklemmt). Das Bild lädt der LESER-Browser direkt vom fremden Host –
+ * `referrerPolicy="no-referrer"` reduziert die mitgesendeten Metadaten (der
+ * IP-Leak selbst bleibt, siehe ROADMAP). Bricht der Bildabruf, wird es versteckt.
+ */
+function EmbedCard({ embed }: { embed: LinkEmbed }) {
+  const [imageOk, setImageOk] = useState(true);
+  return (
+    <a
+      href={embed.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 block max-w-md overflow-hidden rounded border-l-4 border-indigo-500 bg-zinc-800/60 p-3 no-underline transition hover:bg-zinc-800"
+    >
+      {embed.siteName && <p className="text-xs text-zinc-400">{embed.siteName}</p>}
+      {embed.title && (
+        <p className="mt-0.5 font-semibold break-words text-indigo-300">{embed.title}</p>
+      )}
+      {embed.description && (
+        <p className="mt-1 text-sm break-words text-zinc-300">{embed.description}</p>
+      )}
+      {embed.imageUrl && imageOk && (
+        <img
+          src={embed.imageUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setImageOk(false)}
+          className="mt-2 max-h-72 w-full rounded object-cover"
+        />
+      )}
+    </a>
   );
 }
 

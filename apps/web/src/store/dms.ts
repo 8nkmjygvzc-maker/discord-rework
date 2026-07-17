@@ -32,6 +32,8 @@ interface DmsState {
   setActiveDm: (channelId: string | null) => void;
   /** Live eingetroffene fremde DM-Nachricht als ungelesen zählen. */
   markUnread: (channelId: string) => void;
+  /** Neue Nachricht im Kanal → DM in der Liste nach oben rücken. */
+  bumpActivity: (channelId: string, at: string) => void;
   /** USER_UPDATE (Phase 15): Status/Avatar des DM-Partners aktualisieren. */
   applyUserUpdate: (user: PublicUser) => void;
   reset: () => void;
@@ -44,11 +46,19 @@ function authFetch<T>(
   return useAuthStore.getState().authFetch<T>(path, options);
 }
 
+/** Sortier-Zeitstempel eines DM-Kanals: letzte Nachricht, sonst Erstellung. */
+function activityOf(channel: DmChannelInfo): string {
+  return channel.lastMessageAt ?? channel.createdAt;
+}
+
+/** Neueste Unterhaltung zuerst (wie bei Discord). */
+function sortByActivity(channels: DmChannelInfo[]): DmChannelInfo[] {
+  return [...channels].sort((a, b) => activityOf(b).localeCompare(activityOf(a)));
+}
+
 /** Einsortieren ohne Duplikate (REST-Antwort und Gateway-Event überschneiden sich). */
 function upsert(channels: DmChannelInfo[], channel: DmChannelInfo): DmChannelInfo[] {
-  return [...channels.filter((c) => c.id !== channel.id), channel].sort((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  return sortByActivity([...channels.filter((c) => c.id !== channel.id), channel]);
 }
 
 /** Zähler eines Kanals entfernen (ohne neues Objekt, wenn nichts zu tun ist). */
@@ -115,6 +125,14 @@ export const useDmsStore = create<DmsState>()((set, get) => ({
     if (s.activeDmId === channelId) return;
     if (!s.channels.some((c) => c.id === channelId)) return;
     set({ unread: { ...s.unread, [channelId]: (s.unread[channelId] ?? 0) + 1 } });
+  },
+
+  bumpActivity: (channelId, at) => {
+    const s = get();
+    const channel = s.channels.find((c) => c.id === channelId);
+    // Kein DM-Kanal (Server-Kanal) oder schon aktueller: nichts zu tun.
+    if (!channel || (channel.lastMessageAt ?? '') >= at) return;
+    set({ channels: upsert(s.channels, { ...channel, lastMessageAt: at }) });
   },
 
   applyUserUpdate: (user) =>
