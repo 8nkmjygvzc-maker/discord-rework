@@ -1,11 +1,18 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Readable } from 'node:stream';
-import { MAX_PROFILE_IMAGE_BYTES, type AuthUser } from '@parley/shared';
+import {
+  MAX_PROFILE_IMAGE_BYTES,
+  type AuthUser,
+  type PresenceModeUpdatePayload,
+  type PresenceUpdatePayload,
+} from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { PresenceService } from '../gateway/presence.service';
 import { VisibilityService } from '../gateway/visibility.service';
 import { detectImageContentType } from '../common/image.util';
+import { presenceToDb } from '../common/presence.util';
 import { toAuthUser } from '../auth/auth.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -15,6 +22,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly gateway: GatewayService,
+    private readonly presence: PresenceService,
     private readonly visibility: VisibilityService,
   ) {}
 
@@ -25,6 +33,13 @@ export class UsersService {
   }
 
   async updateProfile(id: string, dto: UpdateProfileDto): Promise<AuthUser> {
+    // Alten Anwesenheits-Modus merken – nur ein ECHTER Wechsel löst die
+    // Presence-Broadcasts aus (sonst würde jedes Status-Text-Speichern senden).
+    const before =
+      dto.presence !== undefined
+        ? await this.prisma.user.findUnique({ where: { id }, select: { presence: true } })
+        : null;
+
     const user = await this.prisma.user.update({
       where: { id },
       data: {
@@ -32,11 +47,48 @@ export class UsersService {
         // '' = Bild entfernen (Upload ist der einzige Weg, eines zu setzen).
         ...(dto.avatarUrl !== undefined ? { avatarUrl: null } : {}),
         ...(dto.bannerUrl !== undefined ? { bannerUrl: null } : {}),
+        ...(dto.presence !== undefined ? { presence: presenceToDb(dto.presence) } : {}),
       },
     });
     const result = toAuthUser(user);
-    await this.broadcastProfileUpdate(result);
+
+    // USER_UPDATE (Profil an den Sichtbarkeitskreis) nur bei Profilfeldern –
+    // der Anwesenheits-Modus ist KEIN öffentliches Profildatum.
+    if (dto.status !== undefined || dto.avatarUrl !== undefined || dto.bannerUrl !== undefined) {
+      await this.broadcastProfileUpdate(result);
+    }
+    if (before && before.presence !== user.presence) {
+      await this.broadcastPresenceModeChange(result);
+    }
     return result;
+  }
+
+  /**
+   * Anwesenheits-Modus geändert: Der Nutzer selbst (alle Tabs/Geräte) bekommt
+   * den ECHTEN Modus; der Sichtbarkeitskreis nur den sichtbaren Effekt als
+   * normales PRESENCE_UPDATE – 'invisible' muss für andere ununterscheidbar
+   * von echtem Offline sein.
+   */
+  private async broadcastPresenceModeChange(user: AuthUser): Promise<void> {
+    await this.gateway.publishDispatch(
+      'PRESENCE_MODE_UPDATE',
+      { presence: user.presence } satisfies PresenceModeUpdatePayload,
+      [user.id],
+    );
+
+    // Ohne lebende Gateway-Verbindung gibt es nichts zu melden – der Nutzer
+    // ist ohnehin für alle offline.
+    if (!(await this.presence.isOnline(user.id))) return;
+
+    const visibleTo = await this.visibility.getVisibleUserIds(user.id);
+    const payload: PresenceUpdatePayload =
+      user.presence === 'invisible'
+        ? { user: { id: user.id, username: user.username }, online: false }
+        : {
+            user: { id: user.id, username: user.username, presence: user.presence },
+            online: true,
+          };
+    await this.gateway.publishDispatch('PRESENCE_UPDATE', payload, [...visibleTo, user.id]);
   }
 
   /**

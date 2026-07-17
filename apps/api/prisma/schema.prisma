@@ -12,6 +12,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Gewählter Anwesenheits-Status: DND unterdrückt Desktop-/Push-
+// Benachrichtigungen, INVISIBLE lässt den Nutzer für alle anderen als
+// offline erscheinen. Persistiert, damit er Reload/Neu-Login übersteht.
+enum PresenceMode {
+  ONLINE
+  DND
+  INVISIBLE
+}
+
 model User {
   id           String   @id @default(uuid())
   username     String   @unique
@@ -23,6 +32,8 @@ model User {
   bannerUrl    String?
   // Frei wählbarer Status-Text fürs Profil; Online-Presence läuft über Redis.
   status       String   @default("")
+  // Gewählter Anwesenheits-Modus (siehe PresenceMode).
+  presence     PresenceMode @default(ONLINE)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

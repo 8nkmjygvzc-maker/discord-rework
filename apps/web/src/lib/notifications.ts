@@ -8,6 +8,8 @@
  * entschlüsselten Nachricht gebaut.
  */
 
+import { useAuthStore } from '../store/auth';
+
 export type MentionPermission = NotificationPermission | 'unsupported';
 
 /**
@@ -47,6 +49,8 @@ export async function requestMentionPermission(): Promise<MentionPermission> {
 export function notifyMention(senderUsername: string, channelLabel: string, text: string): void {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   if (document.hasFocus()) return;
+  // „Nicht stören“: gewählter Anwesenheits-Modus unterdrückt Desktop-Popups.
+  if (useAuthStore.getState().user?.presence === 'dnd') return;
   const body = text.length > 140 ? `${text.slice(0, 140)}…` : text;
   const notification = new Notification(`${senderUsername} erwähnt dich in ${channelLabel}`, {
     body,

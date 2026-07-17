@@ -13,6 +13,7 @@ import { useUiStore } from '../store/ui';
 import { useVoiceStore } from '../store/voice';
 import { ApiError } from '../lib/api';
 import { memberRoleColor } from '../lib/roleColors';
+import { presenceDotClass, presenceLabel, presenceMap } from '../lib/presence';
 import Avatar from './Avatar';
 import ModerationDialog from './ModerationDialog';
 
@@ -79,7 +80,8 @@ export default function MembersPanel() {
   }, [nextTimeoutExpiry]);
 
   if (!server) return null;
-  const onlineIds = new Set(onlineUsers.map((u) => u.id));
+  const presenceById = presenceMap(onlineUsers);
+  const onlineIds = new Set(presenceById.keys());
   const inVoiceIds = new Set(voiceStates.map((v) => v.userId));
 
   const myPerms = permissionsFromString(server.myPermissions);
@@ -133,7 +135,8 @@ export default function MembersPanel() {
 
       <ul className="mt-2 space-y-0.5" data-testid="member-list">
         {members.map((member) => {
-          const online = onlineIds.has(member.userId);
+          const memberPresence = presenceById.get(member.userId);
+          const online = memberPresence !== undefined;
           const isOwnerMember = member.userId === server.ownerId;
           const isSelf = member.userId === me?.id;
           const timedOut =
@@ -168,9 +171,8 @@ export default function MembersPanel() {
                     sizeClass="h-8 w-8 text-sm"
                   />
                   <span
-                    className={`absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-zinc-900 ${
-                      online ? 'bg-emerald-500' : 'bg-zinc-600'
-                    }`}
+                    title={presenceLabel(memberPresence)}
+                    className={`absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-zinc-900 ${presenceDotClass(memberPresence)}`}
                   />
                 </button>
                 <div className="min-w-0 flex-1">

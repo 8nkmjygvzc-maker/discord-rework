@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { PresenceUser } from '@parley/shared';
+import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 
 /**
@@ -19,7 +20,24 @@ const PRESENCE_TTL_S = 60;
 
 @Injectable()
 export class PresenceService {
-  constructor(private readonly redis: RedisService) {}
+  constructor(
+    private readonly redis: RedisService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * Sichtbarer Anwesenheits-Modus eines Nutzers laut DB: 'online' | 'dnd',
+   * oder null bei INVISIBLE – dann darf er für andere nie als online
+   * erscheinen (weder in Snapshots noch in PRESENCE_UPDATE-Broadcasts).
+   */
+  async visibleModeOf(userId: string): Promise<'online' | 'dnd' | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { presence: true },
+    });
+    if (!user || user.presence === 'INVISIBLE') return null;
+    return user.presence === 'DND' ? 'dnd' : 'online';
+  }
 
   /** Registriert eine Verbindung. Liefert true, wenn der Nutzer dadurch online GEHT (0 → 1). */
   async markOnline(user: PresenceUser): Promise<boolean> {
@@ -94,6 +112,22 @@ export class PresenceService {
       }
     });
     if (stale.length > 0) await this.redis.client.hdel(USERS_HASH_KEY, ...stale);
-    return online;
+    if (online.length === 0) return online;
+
+    // Gewählten Anwesenheits-Modus aus der DB anreichern: INVISIBLE fliegt
+    // aus JEDER Online-Antwort (für andere ununterscheidbar von offline),
+    // DND reist als Anzeige-Marker mit. Die DB statt Redis ist hier bewusst
+    // die Quelle – der Modus kann sich jederzeit per REST ändern und würde
+    // in einem Redis-Cache veralten.
+    const modes = await this.prisma.user.findMany({
+      where: { id: { in: online.map((u) => u.id) } },
+      select: { id: true, presence: true },
+    });
+    const modeById = new Map(modes.map((m) => [m.id, m.presence]));
+    return online.flatMap((u) => {
+      const mode = modeById.get(u.id) ?? 'ONLINE';
+      if (mode === 'INVISIBLE') return [];
+      return [{ ...u, presence: mode === 'DND' ? ('dnd' as const) : ('online' as const) }];
+    });
   }
 }

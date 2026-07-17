@@ -90,6 +90,13 @@ export class PushService implements OnModuleInit {
   async pushToUserIfOffline(userId: string, payload: PushPayload): Promise<void> {
     if (!this.enabled) return;
     if (await this.presence.isOnline(userId)) return;
+    // „Nicht stören“ ist persistiert und unterdrückt Push auch bei
+    // geschlossenem Tab – bis der Nutzer den Modus wieder wechselt.
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { presence: true },
+    });
+    if (user?.presence === 'DND') return;
     await this.sendToUser(userId, payload);
   }
 

@@ -5,6 +5,12 @@ import { useDmsStore } from '../store/dms';
 import { usePresenceStore } from '../store/presence';
 import { useUiStore } from '../store/ui';
 import { ApiError } from '../lib/api';
+import {
+  presenceDotClass,
+  presenceLabel,
+  presenceMap,
+  type VisiblePresence,
+} from '../lib/presence';
 import Avatar from './Avatar';
 
 type Tab = 'friends' | 'requests' | 'blocked';
@@ -24,7 +30,7 @@ export default function FriendsPanel() {
   const [username, setUsername] = useState('');
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const onlineIds = new Set(onlineUsers.map((u) => u.id));
+  const presenceById = presenceMap(onlineUsers);
   const requestCount = list.incoming.length;
 
   /** Fehler der Aktions-Buttons einheitlich anzeigen. */
@@ -125,7 +131,7 @@ export default function FriendsPanel() {
           <UserList
             users={list.friends}
             emptyText="Noch keine Freunde – schick eine Anfrage!"
-            renderStatus={(u) => (onlineIds.has(u.id) ? 'online' : 'offline')}
+            renderStatus={(u) => presenceById.get(u.id) ?? 'offline'}
             actions={(u) => (
               <>
                 <ActionButton label="Nachricht" primary onClick={() => run(openDm(u.id))} />
@@ -189,7 +195,7 @@ function UserList({
   users: PublicUser[];
   emptyText: string;
   actions: (user: PublicUser) => React.ReactNode;
-  renderStatus?: (user: PublicUser) => 'online' | 'offline';
+  renderStatus?: (user: PublicUser) => VisiblePresence;
 }) {
   if (users.length === 0) {
     return <p className="text-sm text-zinc-500">{emptyText}</p>;
@@ -213,10 +219,8 @@ function UserList({
               <Avatar name={user.username} avatarUrl={user.avatarUrl} sizeClass="h-9 w-9" />
               {status && (
                 <span
-                  title={status === 'online' ? 'Online' : 'Offline'}
-                  className={`absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-zinc-800 ${
-                    status === 'online' ? 'bg-emerald-500' : 'bg-zinc-600'
-                  }`}
+                  title={presenceLabel(status)}
+                  className={`absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-zinc-800 ${presenceDotClass(status)}`}
                 />
               )}
             </button>
@@ -231,7 +235,7 @@ function UserList({
               </button>
               {/* Eigener Status-Text vor dem Online-Zustand (Phase 15). */}
               <p className="truncate text-xs text-zinc-500">
-                {user.status || (status ? (status === 'online' ? 'Online' : 'Offline') : ' ')}
+                {user.status || (status ? presenceLabel(status) : ' ')}
               </p>
             </div>
             <div className="flex gap-1.5 opacity-0 transition group-hover:opacity-100">

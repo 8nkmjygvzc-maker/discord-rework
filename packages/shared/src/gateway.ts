@@ -95,7 +95,12 @@ export type GatewayEventType =
   // Phase 15 – Profil geändert (Status/Avatar): geht an den Sichtbarkeits-
   // kreis + den Nutzer selbst; Clients aktualisieren Mitglieder-/Freundes-/
   // DM-Listen in place.
-  | 'USER_UPDATE';
+  | 'USER_UPDATE'
+  // Anwesenheits-Modus (online/dnd/invisible) geändert – NUR an den Nutzer
+  // selbst (andere Tabs/Geräte). Der Sichtbarkeitskreis bekommt stattdessen
+  // ein normales PRESENCE_UPDATE mit dem sichtbaren Effekt: 'invisible' darf
+  // für andere nicht von echtem Offline unterscheidbar sein.
+  | 'PRESENCE_MODE_UPDATE';
 
 /** Envelope für jede Gateway-Nachricht in beide Richtungen. */
 export interface GatewayMessage<T = unknown> {
@@ -106,10 +111,25 @@ export interface GatewayMessage<T = unknown> {
   d?: T;
 }
 
+/**
+ * Vom Nutzer gewählter Anwesenheits-Status (persistiert in der DB):
+ *   online    – normal sichtbar
+ *   dnd       – „Nicht stören“: sichtbar (roter Punkt), aber KEINE
+ *               Desktop-/Push-Benachrichtigungen
+ *   invisible – erscheint für alle anderen als offline, kann aber alles nutzen
+ */
+export type PresenceMode = 'online' | 'dnd' | 'invisible';
+
 /** Minimale öffentliche Nutzerdaten für Presence-Zwecke. */
 export interface PresenceUser {
   id: string;
   username: string;
+  /**
+   * Sichtbarer Modus in Online-Listen; fehlt = 'online' (ältere Payloads).
+   * 'invisible' taucht hier nie auf – Unsichtbare werden serverseitig aus
+   * allen Presence-Antworten gefiltert und sind von Offline ununterscheidbar.
+   */
+  presence?: 'online' | 'dnd';
 }
 
 export interface HelloPayload {
@@ -147,6 +167,11 @@ export interface UserUpdatePayload {
 /** Nachträglich sichtbar gewordene Online-Nutzer (additiv zum Client-Stand). */
 export interface PresenceSyncPayload {
   users: PresenceUser[];
+}
+
+/** Eigener Anwesenheits-Modus geändert (nur an den Nutzer selbst). */
+export interface PresenceModeUpdatePayload {
+  presence: PresenceMode;
 }
 
 // --- Payloads der Server-/Kanal-Events (Phase 3) ---

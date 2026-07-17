@@ -260,6 +260,13 @@ export class MessagesService {
     const recipients = await this.channelAccess.requireChannelAccess(channelId, userId, 'send');
     const targets = recipients.filter((r) => r !== userId);
     if (targets.length === 0) return;
+    // Wer als unsichtbar (INVISIBLE) unterwegs ist, erscheint für andere
+    // offline – der Tipp-Indikator würde ihn sonst verraten.
+    const sender = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { presence: true },
+    });
+    if (sender?.presence === 'INVISIBLE') return;
     await this.gateway.publishDispatch(
       'TYPING_START',
       { channelId, userId, username } satisfies TypingStartPayload,

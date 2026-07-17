@@ -249,7 +249,10 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
           <ul className="mt-3 space-y-1.5" data-testid="online-list">
             {onlineUsers.map((u) => (
               <li key={u.id} className="flex items-center gap-2 text-sm">
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span
+                  title={u.presence === 'dnd' ? 'Nicht stören' : 'Online'}
+                  className={`h-2.5 w-2.5 rounded-full ${u.presence === 'dnd' ? 'bg-red-500' : 'bg-emerald-500'}`}
+                />
                 <span>{u.username}</span>
                 {u.id === user.id && <span className="text-xs text-zinc-500">(du)</span>}
               </li>

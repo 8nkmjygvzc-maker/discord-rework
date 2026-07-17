@@ -157,12 +157,17 @@ export class GatewayService implements OnModuleDestroy {
     });
 
     if (wasOffline) {
-      await this.publishDispatch(
-        'PRESENCE_UPDATE',
-        { user: state.user, online: true } satisfies PresenceUpdatePayload,
-        // Auch an sich selbst – andere eigene Tabs sollen den Wechsel sehen.
-        [...visibleIds, state.user.id],
-      );
+      // Unsichtbare (INVISIBLE) melden sich nie als online – für den
+      // Sichtbarkeitskreis bleibt der Verbindungsaufbau unsichtbar.
+      const mode = await this.presence.visibleModeOf(state.user.id);
+      if (mode) {
+        await this.publishDispatch(
+          'PRESENCE_UPDATE',
+          { user: { ...state.user, presence: mode }, online: true } satisfies PresenceUpdatePayload,
+          // Auch an sich selbst – andere eigene Tabs sollen den Wechsel sehen.
+          [...visibleIds, state.user.id],
+        );
+      }
     }
   }
 
@@ -192,6 +197,10 @@ export class GatewayService implements OnModuleDestroy {
 
     const wentOffline = await this.presence.markOffline(state.user);
     if (wentOffline) {
+      // Unsichtbare waren für andere nie online → auch kein Offline-Signal
+      // (das Broadcast-Muster würde sonst verraten, dass jemand da war).
+      const mode = await this.presence.visibleModeOf(state.user.id);
+      if (!mode) return;
       const visibleIds = await this.visibility.getVisibleUserIds(state.user.id);
       await this.publishDispatch(
         'PRESENCE_UPDATE',

@@ -1,3 +1,5 @@
+import type { PresenceMode } from './gateway';
+
 /** Öffentliche Nutzerdaten, wie die API sie ausliefert (nie passwordHash!). */
 export interface AuthUser {
   id: string;
@@ -7,6 +9,8 @@ export interface AuthUser {
   /** Profil-Banner (Querformat) – null = Farbverlauf auf der Profilkarte. */
   bannerUrl: string | null;
   status: string;
+  /** Gewählter Anwesenheits-Status (online / dnd / invisible) – nur für einen selbst sichtbar. */
+  presence: PresenceMode;
   createdAt: string;
 }
 
@@ -23,6 +27,8 @@ export interface UpdateProfileRequest {
   avatarUrl?: string;
   /** Nur '' erlaubt (Banner entfernen) – gesetzt wird per Upload-Endpunkt. */
   bannerUrl?: string;
+  /** Anwesenheits-Status wechseln (online / dnd / invisible). */
+  presence?: PresenceMode;
 }
 
 /**

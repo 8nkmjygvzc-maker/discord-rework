@@ -1,4 +1,5 @@
-import { Equals, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Equals, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import type { PresenceMode } from '@parley/shared';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -20,4 +21,9 @@ export class UpdateProfileDto {
   @IsOptional()
   @Equals('', { message: 'Banner werden über den Upload gesetzt' })
   bannerUrl?: string;
+
+  /** Anwesenheits-Status: online, dnd (Nicht stören) oder invisible (Offline). */
+  @IsOptional()
+  @IsIn(['online', 'dnd', 'invisible'], { message: 'Ungültiger Anwesenheits-Status' })
+  presence?: PresenceMode;
 }

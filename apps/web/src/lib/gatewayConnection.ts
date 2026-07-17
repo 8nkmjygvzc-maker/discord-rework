@@ -6,6 +6,7 @@ import type {
   MessageCreatePayload,
   MessageDeletePayload,
   MessageInfo,
+  PresenceModeUpdatePayload,
   PresenceSyncPayload,
   PresenceUpdatePayload,
   ReadyPayload,
@@ -61,6 +62,16 @@ const client = new GatewayClient({
       case 'PRESENCE_SYNC':
         usePresenceStore.getState().handlePresenceSync(d as PresenceSyncPayload);
         return;
+      case 'PRESENCE_MODE_UPDATE': {
+        // Eigener Anwesenheits-Modus, in einem anderen Tab/Gerät gewechselt.
+        const me = useAuthStore.getState().user;
+        if (me) {
+          useAuthStore.setState({
+            user: { ...me, presence: (d as PresenceModeUpdatePayload).presence },
+          });
+        }
+        return;
+      }
       case 'FRIENDS_UPDATE':
         void useFriendsStore.getState().loadFriends().catch(logReloadError('Freunde'));
         return;

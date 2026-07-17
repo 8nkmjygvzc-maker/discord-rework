@@ -4,6 +4,7 @@ import { Prisma, User } from '@prisma/client';
 import * as argon2 from 'argon2';
 import type { AuthUser } from '@parley/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { presenceToWire } from '../common/presence.util';
 import { generateRefreshToken, hashRefreshToken, refreshTokenExpiry } from './token.util';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -147,6 +148,7 @@ export function toAuthUser(user: User): AuthUser {
     avatarUrl: user.avatarUrl,
     bannerUrl: user.bannerUrl,
     status: user.status,
+    presence: presenceToWire(user.presence),
     createdAt: user.createdAt.toISOString(),
   };
 }

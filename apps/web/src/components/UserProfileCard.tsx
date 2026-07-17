@@ -4,6 +4,7 @@ import { useDmsStore } from '../store/dms';
 import { usePresenceStore } from '../store/presence';
 import { useUiStore } from '../store/ui';
 import { ApiError } from '../lib/api';
+import { presenceDotClass, presenceLabel } from '../lib/presence';
 import Avatar from './Avatar';
 
 /**
@@ -16,9 +17,10 @@ export default function UserProfileCard({ onOpenDm }: { onOpenDm?: () => void })
   const user = useUiStore((s) => s.profileUser);
   const closeProfile = useUiStore((s) => s.closeProfile);
   const me = useAuthStore((s) => s.user);
-  const online = usePresenceStore((s) =>
-    user ? s.onlineUsers.some((u) => u.id === user.id) : false,
-  );
+  const presence = usePresenceStore((s) => {
+    const entry = user ? s.onlineUsers.find((u) => u.id === user.id) : undefined;
+    return entry ? (entry.presence ?? 'online') : 'offline';
+  });
   const openDm = useDmsStore((s) => s.openDm);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,10 +70,8 @@ export default function UserProfileCard({ onOpenDm }: { onOpenDm?: () => void })
                 fallbackClass="bg-indigo-600"
               />
               <span
-                title={online ? 'Online' : 'Offline'}
-                className={`absolute right-0.5 bottom-0.5 h-5 w-5 rounded-full border-4 border-zinc-800 ${
-                  online ? 'bg-emerald-500' : 'bg-zinc-600'
-                }`}
+                title={presenceLabel(presence)}
+                className={`absolute right-0.5 bottom-0.5 h-5 w-5 rounded-full border-4 border-zinc-800 ${presenceDotClass(presence)}`}
               />
             </span>
             <button

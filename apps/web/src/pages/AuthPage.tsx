@@ -75,7 +75,7 @@ export default function AuthPage() {
                 className={inputCls}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="z. B. arian_23"
+                placeholder="Dein Benutzername"
                 autoComplete="username"
                 required
               />

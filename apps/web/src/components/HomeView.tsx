@@ -6,6 +6,7 @@ import { useServersStore } from '../store/servers';
 import { usePresenceStore } from '../store/presence';
 import { useUiStore } from '../store/ui';
 import { useVoiceStore } from '../store/voice';
+import { presenceDotClass, presenceLabel, presenceMap } from '../lib/presence';
 import Avatar from './Avatar';
 import ChatView from './ChatView';
 import FriendsPanel from './FriendsPanel';
@@ -56,7 +57,7 @@ export default function HomeView({
     friends.blocked.length === 0;
   const showWelcome = freshAccount && !welcomeSkipped;
 
-  const onlineIds = new Set(onlineUsers.map((u) => u.id));
+  const presenceById = presenceMap(onlineUsers);
   const selected = channels.find((c) => c.id === selectedDmId) ?? null;
 
   // Handy-Drawer (Verbesserungs-Runde): wie in MainPage für die Server-Ansicht.
@@ -123,9 +124,8 @@ export default function HomeView({
                         sizeClass="h-7 w-7 text-xs"
                       />
                       <span
-                        className={`absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-zinc-900 ${
-                          onlineIds.has(dm.otherUser.id) ? 'bg-emerald-500' : 'bg-zinc-600'
-                        }`}
+                        title={presenceLabel(presenceById.get(dm.otherUser.id))}
+                        className={`absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-zinc-900 ${presenceDotClass(presenceById.get(dm.otherUser.id))}`}
                       />
                     </span>
                     <span className="min-w-0 flex-1">
