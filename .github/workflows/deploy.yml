@@ -103,6 +103,13 @@ jobs:
             # GITHUB_TOKEN ist während des Workflow-Laufs für GHCR-Pulls gültig.
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker compose -f docker-compose.prod.yml pull
+            # EINMALIGE Reparatur – nach dem nächsten erfolgreichen Deploy wieder
+            # entfernen: Der Deploy vom 16.07. hat die Migration
+            # 20260713182842_key_backup als "failed" in _prisma_migrations
+            # hinterlassen (Tabellen-Konflikt durch den Merge am 16.07.).
+            # Ohne "rolled back"-Markierung bricht jeder migrate deploy mit
+            # P3009 ab. Schlägt fehl, sobald der Eintrag repariert ist → || true.
+            docker compose -f docker-compose.prod.yml run --rm api npx prisma migrate resolve --rolled-back 20260713182842_key_backup --schema apps/api/prisma/schema.prisma || true
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f
             docker compose -f docker-compose.prod.yml ps

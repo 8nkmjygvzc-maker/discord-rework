@@ -18,6 +18,9 @@ model User {
   email        String   @unique
   passwordHash String
   avatarUrl    String?
+  // Aus Migration 20260713004444 (Feature aktuell ohne API-Endpunkt; Spalte
+  // bleibt erhalten, damit Schema und DB übereinstimmen).
+  bannerUrl    String?
   // Frei wählbarer Status-Text fürs Profil; Online-Presence läuft über Redis.
   status       String   @default("")
   createdAt    DateTime @default(now())

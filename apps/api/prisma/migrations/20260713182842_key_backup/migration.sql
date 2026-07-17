@@ -1,3 +1,9 @@
+-- Die Tabelle "KeyBackup" existiert bereits aus 20260713004444_banner_and_key_backup,
+-- dort aber mit dem alten Backup-Format (salt/nonce/ciphertext). Das neue Format
+-- (separater KDF- und Wrapped-Key-Teil) ist damit inkompatibel und alte Blobs sind
+-- vom neuen Client nicht lesbar – daher Tabelle verwerfen und neu anlegen.
+DROP TABLE IF EXISTS "KeyBackup";
+
 -- CreateTable
 CREATE TABLE "KeyBackup" (
     "userId" TEXT NOT NULL,
