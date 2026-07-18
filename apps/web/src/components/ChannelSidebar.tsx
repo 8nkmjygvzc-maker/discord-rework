@@ -5,8 +5,8 @@ import {
   permissionsFromString,
   VoiceState,
 } from '@parley/shared';
-import { useState } from 'react';
-import type { DragEvent } from 'react';
+import { useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useAuthStore } from '../store/auth';
 import { useServersStore } from '../store/servers';
 import { useVoiceStore } from '../store/voice';
@@ -29,13 +29,19 @@ function runAction(what: string, action: Promise<void>): void {
   });
 }
 
-/** DnD-Handler einer Kanalzeile – leer, wenn der Nutzer nicht sortieren darf. */
+/**
+ * DnD-Props einer Kanalzeile – leer, wenn der Nutzer nicht sortieren darf.
+ * Bewusst Pointer-Events statt nativem HTML5-Drag&Drop: Letzteres bricht in
+ * Chrome ab, sobald React im dragstart-Moment neu rendert, und startet in
+ * Firefox auf <button>-Elementen nicht zuverlässig.
+ */
 interface ChannelDragProps {
-  draggable?: boolean;
-  onDragStart?: (e: DragEvent<HTMLButtonElement>) => void;
-  onDragEnd?: () => void;
-  onDragOver?: (e: DragEvent<HTMLButtonElement>) => void;
-  onDrop?: (e: DragEvent<HTMLButtonElement>) => void;
+  'data-channel-id'?: string;
+  onPointerDown?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerMove?: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerUp?: () => void;
+  onPointerCancel?: () => void;
+  onClickCapture?: (e: ReactMouseEvent<HTMLButtonElement>) => void;
 }
 
 interface ChannelSidebarProps {
@@ -65,10 +71,17 @@ export default function ChannelSidebar({
   const leaveServer = useServersStore((s) => s.leaveServer);
   const deleteServer = useServersStore((s) => s.deleteServer);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Kanal-Sortierung per Drag & Drop (Verbesserungs-Runde): gezogener Kanal
-  // und aktuelles Ziel (Einfüge-Linie über bzw. unter der Ziel-Zeile).
+  // Kanal-Sortierung durch Ziehen mit der Maus (Verbesserungs-Runde): gezogener
+  // Kanal und aktuelles Ziel (Einfüge-Linie über bzw. unter der Ziel-Zeile).
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
+  // Laufender Pointer-Drag (Ref statt State: ändert sich bei jedem Move).
+  const pointerDrag = useRef<{ id: string; startX: number; startY: number; moved: boolean } | null>(
+    null,
+  );
+  // Nach einem Drag den nachlaufenden Klick schlucken (würde sonst den Kanal
+  // auswählen bzw. dem Sprachkanal beitreten).
+  const suppressClick = useRef(false);
 
   if (!user) return null;
   const isOwner = server?.ownerId === user.id;
@@ -87,14 +100,26 @@ export default function ChannelSidebar({
   const voiceChannels = server?.channels.filter((c) => c.type === 'VOICE') ?? [];
   const canDelete = canManageChannels && (server?.channels.length ?? 0) > 1;
 
+  /** Kanalzeile unter dem Zeiger finden (Hit-Test über data-channel-id). */
+  const rowAt = (x: number, y: number): { channel: ChannelInfo; after: boolean } | null => {
+    const el = document.elementFromPoint(x, y)?.closest('[data-channel-id]');
+    if (!(el instanceof HTMLElement) || !server) return null;
+    const channel = server.channels.find((c) => c.id === el.dataset.channelId);
+    if (!channel) return null;
+    const rect = el.getBoundingClientRect();
+    return { channel, after: y > rect.top + rect.height / 2 };
+  };
+
   /** Drop ausführen: Sektion neu ordnen und die KOMPLETTE Liste zum Server. */
-  const commitDrop = (target: ChannelInfo) => {
+  const commitDrop = (draggedId: string) => {
     const drop = dropTarget;
-    const dragged = server?.channels.find((c) => c.id === dragId) ?? null;
     setDragId(null);
     setDropTarget(null);
+    if (!server || !drop) return;
+    const dragged = server.channels.find((c) => c.id === draggedId);
+    const target = server.channels.find((c) => c.id === drop.id);
     // Nur innerhalb derselben Sektion (Text bleibt bei Text, Voice bei Voice).
-    if (!server || !dragged || !drop || drop.id !== target.id) return;
+    if (!dragged || !target) return;
     if (dragged.id === target.id || dragged.type !== target.type) return;
     const section = dragged.type === 'TEXT' ? textChannels : voiceChannels;
     const rest = section.filter((c) => c.id !== dragged.id);
@@ -115,31 +140,64 @@ export default function ChannelSidebar({
   const dragProps = (channel: ChannelInfo): ChannelDragProps => {
     if (!canManageChannels) return {};
     return {
-      draggable: true,
-      onDragStart: (e) => {
-        setDragId(channel.id);
-        e.dataTransfer.effectAllowed = 'move';
-        // Firefox startet den Drag nur, wenn Daten gesetzt sind.
-        e.dataTransfer.setData('text/plain', channel.id);
+      'data-channel-id': channel.id,
+      onPointerDown: (e) => {
+        // Nur linke Maustaste; Touch soll weiter scrollen (siehe ROADMAP).
+        if (e.pointerType !== 'mouse' || e.button !== 0) return;
+        suppressClick.current = false;
+        pointerDrag.current = {
+          id: channel.id,
+          startX: e.clientX,
+          startY: e.clientY,
+          moved: false,
+        };
+        // Capture hält den Drag auch außerhalb der Zeile am Leben. Synthetische
+        // Events (Tests) haben keine echte pointerId → Fehler tolerieren.
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* ohne Capture funktioniert das Ziehen trotzdem, nur weniger robust */
+        }
       },
-      onDragEnd: () => {
+      onPointerMove: (e) => {
+        const d = pointerDrag.current;
+        if (!d || d.id !== channel.id) return;
+        if (!d.moved) {
+          // Erst ab ein paar Pixeln Bewegung ist es ein Drag, kein Klick.
+          if (Math.abs(e.clientX - d.startX) + Math.abs(e.clientY - d.startY) < 5) return;
+          d.moved = true;
+          setDragId(channel.id);
+        }
+        const hit = rowAt(e.clientX, e.clientY);
+        const next =
+          hit && hit.channel.type === channel.type && hit.channel.id !== channel.id
+            ? { id: hit.channel.id, after: hit.after }
+            : null;
+        setDropTarget((t) => (t?.id === next?.id && t?.after === next?.after ? t : next));
+      },
+      onPointerUp: () => {
+        const d = pointerDrag.current;
+        pointerDrag.current = null;
+        if (!d) return;
+        if (d.moved) {
+          suppressClick.current = true;
+          commitDrop(d.id);
+        } else {
+          setDragId(null);
+          setDropTarget(null);
+        }
+      },
+      onPointerCancel: () => {
+        pointerDrag.current = null;
         setDragId(null);
         setDropTarget(null);
       },
-      onDragOver: (e) => {
-        const dragged = server?.channels.find((c) => c.id === dragId);
-        if (!dragged || dragged.id === channel.id || dragged.type !== channel.type) return;
-        e.preventDefault(); // erlaubt den Drop
-        e.dataTransfer.dropEffect = 'move';
-        const rect = e.currentTarget.getBoundingClientRect();
-        const after = e.clientY > rect.top + rect.height / 2;
-        setDropTarget((t) =>
-          t?.id === channel.id && t.after === after ? t : { id: channel.id, after },
-        );
-      },
-      onDrop: (e) => {
-        e.preventDefault();
-        commitDrop(channel);
+      onClickCapture: (e) => {
+        if (suppressClick.current) {
+          suppressClick.current = false;
+          e.preventDefault();
+          e.stopPropagation();
+        }
       },
     };
   };
