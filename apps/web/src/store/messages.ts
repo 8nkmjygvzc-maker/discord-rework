@@ -8,6 +8,7 @@ import {
   MessageHistoryResponse,
   MessageInfo,
   ReplyRef,
+  StickerRef,
   TypingStartPayload,
 } from '@parley/shared';
 import { useAuthStore } from './auth';
@@ -70,6 +71,8 @@ interface MessagesState {
     emoji: string,
     action: 'add' | 'remove',
   ) => Promise<void>;
+  /** Server-Sticker als eigene Nachricht verschicken (Referenz reist E2EE). */
+  sendSticker: (channelId: string, sticker: StickerRef, replyTo?: ReplyRef) => Promise<void>;
   /** Eigene Nachricht bearbeiten (Phase 13) – Text neu verschlüsseln. */
   editMessage: (channelId: string, messageId: string, content: string) => Promise<void>;
   /** Nachricht löschen (Autor oder Moderation, Phase 13). */
@@ -189,8 +192,26 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
           replyTo: replyTo ?? null,
           reaction: null,
           embeds,
+          sticker: null,
         },
       },
+    }));
+    get().handleMessageCreate(message);
+  },
+
+  sendSticker: async (channelId, sticker, replyTo) => {
+    const { serverId, memberIds } = resolveChannelContext(channelId);
+    // Gleiche Pipeline wie Textnachrichten: Die Sticker-Referenz steht IM
+    // E2EE-Klartext, der Server sieht eine ganz normale (kleine) Nachricht.
+    const plaintext = encodeMessageContent('', [], replyTo, [], sticker);
+    const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
+    const message = await authFetch<MessageInfo>(`/api/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: payload,
+    });
+    // Eigenen Klartext direkt eintragen – kein Entschlüsselungs-Umweg nötig.
+    set((s) => ({
+      decrypted: { ...s.decrypted, [message.id]: decodeMessageContent(plaintext) },
     }));
     get().handleMessageCreate(message);
   },
@@ -223,6 +244,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
       existing?.attachments ?? [],
       existing?.replyTo ?? undefined,
       existing?.embeds ?? [],
+      existing?.sticker ?? undefined,
     );
     const payload = await e2ee.encryptForChannel(channelId, serverId, memberIds, plaintext);
     const message = await authFetch<MessageInfo>(

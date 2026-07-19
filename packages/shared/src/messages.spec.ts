@@ -9,6 +9,7 @@ import {
   MAX_REACTION_EMOJI_LENGTH,
   MAX_REPLY_PREVIEW_LENGTH,
 } from './messages';
+import { MAX_STICKER_NAME_LENGTH } from './stickers';
 import type { LinkEmbed } from './messages';
 
 describe('Nachrichten-Inhaltsformat (Phase 8/9)', () => {
@@ -35,6 +36,7 @@ describe('Nachrichten-Inhaltsformat (Phase 8/9)', () => {
       replyTo: null,
       reaction: null,
       embeds: [],
+      sticker: null,
     });
     // Auch krumme JSON-ähnliche Texte fallen sauber auf Rohtext zurück.
     expect(decodeMessageContent('{kein json').text).toBe('{kein json');
@@ -154,6 +156,36 @@ describe('Nachrichten-Inhaltsformat (Phase 8/9)', () => {
     expect(decoded.embeds[0].url).toBe('https://ok.example/seite');
     expect(decoded.embeds[0].imageUrl).toBeUndefined();
     expect(decoded.embeds[0].title).toHaveLength(MAX_EMBED_TITLE_LENGTH);
+  });
+
+  it('kodiert und dekodiert Sticker-Referenzen und klemmt den Namen', () => {
+    const sticker = { id: 'st-1', name: 'x'.repeat(100), mimeType: 'image/png' };
+    const decoded = decodeMessageContent(encodeMessageContent('', [], undefined, [], sticker));
+    expect(decoded.sticker?.id).toBe('st-1');
+    expect(decoded.sticker?.name).toHaveLength(MAX_STICKER_NAME_LENGTH);
+    expect(decoded.sticker?.mimeType).toBe('image/png');
+    expect(decoded.text).toBe('');
+  });
+
+  it('validiert Sticker-Referenzen defensiv (ID-Format, MIME-Typ)', () => {
+    // Die ID landet in einer URL → Sonderzeichen werden komplett verworfen.
+    const badId = JSON.stringify({
+      v: 1,
+      text: '',
+      sticker: { id: '../../etc', name: 'böse', mimeType: 'image/png' },
+    });
+    expect(decodeMessageContent(badId).sticker).toBeNull();
+    // Kein image/*-Typ → Referenz bleibt, aber ohne MIME-Typ (Browser sniffen).
+    const badMime = JSON.stringify({
+      v: 1,
+      text: '',
+      sticker: { id: 'st-1', name: 'ok', mimeType: 'text/html' },
+    });
+    expect(decodeMessageContent(badMime).sticker).toEqual({ id: 'st-1', name: 'ok' });
+    // Kaputte Struktur → null statt Crash.
+    const broken = JSON.stringify({ v: 1, text: 'hi', sticker: { id: 42 } });
+    expect(decodeMessageContent(broken).sticker).toBeNull();
+    expect(decodeMessageContent(broken).text).toBe('hi');
   });
 
   it('deckelt die Anzahl der Embeds', () => {

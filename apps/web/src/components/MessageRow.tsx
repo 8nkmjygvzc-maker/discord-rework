@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { MAX_EMBEDS_PER_MESSAGE } from '@parley/shared';
-import type { DecodedMessageContent, LinkEmbed, MessageInfo } from '@parley/shared';
+import type { DecodedMessageContent, LinkEmbed, MessageInfo, StickerRef } from '@parley/shared';
 import type { ReactionEventState } from '../store/messages';
 import { MentionTargets, splitMentions } from '../lib/mentions';
 import { splitLinks } from '../lib/links';
@@ -15,6 +15,7 @@ import {
 } from '../lib/mediaEmbeds';
 import AttachmentView from './AttachmentView';
 import Avatar from './Avatar';
+import StickerImage from './StickerImage';
 
 /** Schnellauswahl fürs Reaktions-Popover – bewusst klein für v1. */
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '✅', '👎'];
@@ -100,8 +101,9 @@ export default function MessageRow({
 
   // Nur eigene, entschlüsselte Textnachrichten (keine Reaktions-Events) lassen
   // sich bearbeiten; löschen darf der Autor oder jemand mit ManageMessages.
+  // Sticker-Nachrichten sind nicht bearbeitbar (wie bei Discord), nur löschbar.
   const isTextMessage = content !== undefined && !content.reaction;
-  const canEdit = isOwn && isTextMessage;
+  const canEdit = isOwn && isTextMessage && !content?.sticker;
   const canDelete = isTextMessage && (isOwn || canManageMessages);
 
   function startEdit() {
@@ -253,6 +255,7 @@ export default function MessageRow({
                 />
               )
             )}
+            {content.sticker && <StickerView sticker={content.sticker} />}
             <EmbedList text={content.text} embeds={content.embeds} />
             {content.attachments.map((meta) => (
               <AttachmentView key={meta.id} meta={meta} />
@@ -369,6 +372,28 @@ export default function MessageRow({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * Sticker in einer Nachricht (feste Kantenlänge wie bei Discord). Die Referenz
+ * ist absenderkontrolliert, aber beim Dekodieren schon validiert (ID-Format,
+ * MIME-Typ); ist das Bild nicht (mehr) ladbar – Sticker gelöscht oder ID aus
+ * einem fremden Server (404) – bleibt ein Text-Platzhalter mit dem Namen.
+ */
+function StickerView({ sticker }: { sticker: StickerRef }) {
+  return (
+    <StickerImage
+      stickerId={sticker.id}
+      mimeType={sticker.mimeType}
+      name={sticker.name}
+      className="mt-0.5 h-40 w-40 object-contain"
+      fallback={
+        <p className="mt-0.5 text-sm text-zinc-500 italic" data-testid="sticker-unavailable">
+          🏷️ Sticker „{sticker.name}“ ist nicht (mehr) verfügbar
+        </p>
+      }
+    />
   );
 }
 

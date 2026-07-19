@@ -19,6 +19,7 @@ import { InvitesModule } from './invites/invites.module';
 import { PushModule } from './push/push.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { SoundboardModule } from './soundboard/soundboard.module';
+import { StickersModule } from './stickers/stickers.module';
 import { UnfurlModule } from './unfurl/unfurl.module';
 
 @Module({
@@ -47,6 +48,7 @@ import { UnfurlModule } from './unfurl/unfurl.module';
     PushModule,
     ModerationModule,
     SoundboardModule,
+    StickersModule,
     UnfurlModule,
   ],
 })

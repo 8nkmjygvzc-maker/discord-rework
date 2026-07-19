@@ -56,6 +56,7 @@ model User {
   auditActions    AuditLogEntry[]    @relation("AuditActor")
   auditTargeted   AuditLogEntry[]    @relation("AuditTarget")
   soundboardSounds SoundboardSound[] @relation("UploadedSounds")
+  stickers        Sticker[]          @relation("UploadedStickers")
 }
 
 // Phase 7: Freundschaften. `userId` ist der Initiator des AKTUELLEN Zustands –
@@ -158,6 +159,7 @@ model Server {
   bans             Ban[]
   auditLog         AuditLogEntry[]
   soundboardSounds SoundboardSound[]
+  stickers         Sticker[]
 }
 
 model Membership {
@@ -383,6 +385,28 @@ model SoundboardSound {
   // Wiedergabelautstärke 0.05–1 (nur Anzeige-Metadatum; Clients klemmen selbst).
   volume     Float    @default(1)
   // MIME-Typ (audio/*), vom Uploader gemeldet – für die Wiedergabe im Client.
+  mimeType   String
+  objectKey  String   @unique
+  sizeBytes  Int
+  createdAt  DateTime @default(now())
+
+  @@index([serverId])
+}
+
+// Sticker: Server-weite Bild-Bibliothek für Textnachrichten. Das Bild liegt
+// als Blob in MinIO (objectKey "stickers/{serverId}/{uuid}") – bewusst
+// unverschlüsselt, wie die Soundboard-Sounds (geteiltes Server-Asset). Die
+// Sticker-REFERENZ einer Nachricht reist dagegen im E2EE-Ciphertext – der
+// Server weiß nicht, in welcher Nachricht welcher Sticker steckt.
+model Sticker {
+  id         String   @id @default(uuid())
+  serverId   String
+  server     Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  // SetNull: Der Sticker überlebt das Löschen des Uploader-Kontos.
+  uploaderId String?
+  uploader   User?    @relation("UploadedStickers", fields: [uploaderId], references: [id], onDelete: SetNull)
+  name       String
+  // MIME-Typ (image/*), vom Uploader gemeldet – fürs Rendern im Client.
   mimeType   String
   objectKey  String   @unique
   sizeBytes  Int

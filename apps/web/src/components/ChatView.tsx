@@ -6,6 +6,7 @@ import {
   Permissions,
   permissionsFromString,
   ReplyRef,
+  StickerInfo,
 } from '@parley/shared';
 import { useMessagesStore } from '../store/messages';
 import { useAuthStore } from '../store/auth';
@@ -22,6 +23,7 @@ import {
 import { findMentions, MentionKind, MentionTargets, mentionsMember } from '../lib/mentions';
 import { useUiStore } from '../store/ui';
 import MessageRow from './MessageRow';
+import StickerPicker from './StickerPicker';
 import { ApiError } from '../lib/api';
 
 interface ChatViewProps {
@@ -61,6 +63,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const loadHistory = useMessagesStore((s) => s.loadHistory);
   const loadOlder = useMessagesStore((s) => s.loadOlder);
   const sendMessage = useMessagesStore((s) => s.sendMessage);
+  const sendSticker = useMessagesStore((s) => s.sendSticker);
   const sendReaction = useMessagesStore((s) => s.sendReaction);
   const editMessage = useMessagesStore((s) => s.editMessage);
   const deleteMessage = useMessagesStore((s) => s.deleteMessage);
@@ -70,6 +73,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<ReplyRef | null>(null);
+  const [stickersOpen, setStickersOpen] = useState(false);
   const [threadRootId, setThreadRootId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -234,7 +238,8 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
         if (!content) return false;
         return (
           content.text.toLowerCase().includes(query) ||
-          content.attachments.some((a) => a.name.toLowerCase().includes(query))
+          content.attachments.some((a) => a.name.toLowerCase().includes(query)) ||
+          (content.sticker?.name.toLowerCase().includes(query) ?? false)
         );
       });
     }
@@ -254,6 +259,7 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     setFiles([]);
     setError(null);
     setReplyTo(null);
+    setStickersOpen(false);
     setThreadRootId(null);
     setSearchOpen(false);
     setSearchQuery('');
@@ -340,7 +346,10 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     if (!message) return;
     const content = decrypted[messageId];
     const preview =
-      content?.text || (content?.attachments[0] ? `📎 ${content.attachments[0].name}` : '') || '🔒';
+      content?.text ||
+      (content?.sticker ? `🏷️ ${content.sticker.name}` : '') ||
+      (content?.attachments[0] ? `📎 ${content.attachments[0].name}` : '') ||
+      '🔒';
     setReplyTo({
       messageId,
       senderId: message.senderId,
@@ -492,6 +501,27 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
     dm || hasPermission(permissionsFromString(myPermissions), Permissions.SendMessages);
   const canManageMessages =
     !dm && hasPermission(permissionsFromString(myPermissions), Permissions.ManageMessages);
+  const canManageStickers =
+    !dm && hasPermission(permissionsFromString(myPermissions), Permissions.ManageStickers);
+  // Sticker gibt es nur in Server-Kanälen: In DMs hätte die Gegenseite ohne
+  // gemeinsame Mitgliedschaft keinen Zugriff auf das Bild (404 vom Server).
+  const serverId = useServersStore((s) => (dm ? null : (s.selectedServer?.id ?? null)));
+
+  /** Sticker aus dem Picker sofort verschicken (wie bei Discord). */
+  function pickSticker(sticker: StickerInfo) {
+    setStickersOpen(false);
+    setError(null);
+    stickToBottom.current = true;
+    sendSticker(
+      channel.id,
+      { id: sticker.id, name: sticker.name, mimeType: sticker.mimeType },
+      replyTo ?? undefined,
+    )
+      .then(() => setReplyTo(null))
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Sticker konnte nicht gesendet werden');
+      });
+  }
 
   // Private Anrufe (nur DM): Roster dieses Kanals + eigener Verbindungsstatus.
   const callStates = useVoiceStore((s) => (dm ? (s.dmCalls[channel.id] ?? null) : null));
@@ -911,6 +941,30 @@ export default function ChatView({ channel, dm = false }: ChatViewProps) {
             >
               📎
             </button>
+            {serverId && (
+              <>
+                {stickersOpen && (
+                  <StickerPicker
+                    serverId={serverId}
+                    canManage={canManageStickers}
+                    onPick={pickSticker}
+                    onClose={() => setStickersOpen(false)}
+                  />
+                )}
+                <button
+                  type="button"
+                  title="Sticker senden"
+                  data-testid="sticker-toggle"
+                  onClick={() => setStickersOpen((open) => !open)}
+                  disabled={sending}
+                  className={`rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50 ${
+                    stickersOpen ? 'text-zinc-200' : 'text-zinc-400'
+                  }`}
+                >
+                  🏷️
+                </button>
+              </>
+            )}
             <input
               ref={inputRef}
               // Bewusst NICHT disabled beim Senden: der Fokus bleibt erhalten

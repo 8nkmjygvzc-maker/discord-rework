@@ -14,6 +14,7 @@
  * ist eine Reaktion eine ganz normale (kleine) Nachricht.
  */
 import type { EncryptedMessageHeader } from './crypto/senderkey';
+import { MAX_STICKER_NAME_LENGTH } from './stickers';
 
 /** Server-seitige Sicht auf einen Anhang – bewusst nur unverfängliche Felder. */
 export interface AttachmentInfo {
@@ -130,6 +131,20 @@ export interface ReactionContent {
   action: 'add' | 'remove';
 }
 
+/**
+ * Sticker-Referenz: Welcher Sticker gemeint ist, reist IM E2EE-Klartext –
+ * der Server sieht nur eine normale (kleine) Nachricht. Das Bild selbst holt
+ * der Empfänger über GET /api/stickers/:id/image (Server-Asset, nur für
+ * Mitglieder). `name` und `mimeType` sind eingebettet, damit die Nachricht
+ * auch ohne geladene Sticker-Bibliothek gerendert werden kann.
+ */
+export interface StickerRef {
+  id: string;
+  name: string;
+  /** image/*-Typ fürs Rendern; fehlt er, sniffen Browser das Format selbst. */
+  mimeType?: string;
+}
+
 /** Genug für Emoji-Sequenzen (Hautfarben/ZWJ), zu kurz für Text-Missbrauch. */
 export const MAX_REACTION_EMOJI_LENGTH = 32;
 export const MAX_REPLY_PREVIEW_LENGTH = 160;
@@ -207,6 +222,8 @@ export interface MessageContentV1 {
   reaction?: ReactionContent;
   /** Link-Vorschau-Karten zu den URLs im Text (Feinschliff). */
   embeds?: LinkEmbed[];
+  /** Wenn gesetzt, zeigt diese Nachricht einen Server-Sticker (text bleibt leer). */
+  sticker?: StickerRef;
 }
 
 export interface DecodedMessageContent {
@@ -215,6 +232,7 @@ export interface DecodedMessageContent {
   replyTo: ReplyRef | null;
   reaction: ReactionContent | null;
   embeds: LinkEmbed[];
+  sticker: StickerRef | null;
 }
 
 /** Baut den zu verschlüsselnden Klartext (immer JSON, Version 1). */
@@ -223,6 +241,7 @@ export function encodeMessageContent(
   attachments: AttachmentMeta[] = [],
   replyTo?: ReplyRef,
   embeds: LinkEmbed[] = [],
+  sticker?: StickerRef,
 ): string {
   const content: MessageContentV1 = {
     v: 1,
@@ -232,6 +251,9 @@ export function encodeMessageContent(
       ? { replyTo: { ...replyTo, preview: replyTo.preview.slice(0, MAX_REPLY_PREVIEW_LENGTH) } }
       : {}),
     ...(embeds.length > 0 ? { embeds: embeds.slice(0, MAX_EMBEDS_PER_MESSAGE) } : {}),
+    ...(sticker
+      ? { sticker: { ...sticker, name: sticker.name.slice(0, MAX_STICKER_NAME_LENGTH) } }
+      : {}),
   };
   return JSON.stringify(content);
 }
@@ -267,13 +289,21 @@ export function decodeMessageContent(plaintext: string): DecodedMessageContent {
           replyTo: sanitizeReplyRef(parsed.replyTo),
           reaction: sanitizeReaction(parsed.reaction),
           embeds: sanitizeEmbeds(parsed.embeds),
+          sticker: sanitizeStickerRef(parsed.sticker),
         };
       }
     } catch {
       // kein JSON → Rohtext aus einer früheren Phase
     }
   }
-  return { text: plaintext, attachments: [], replyTo: null, reaction: null, embeds: [] };
+  return {
+    text: plaintext,
+    attachments: [],
+    replyTo: null,
+    reaction: null,
+    embeds: [],
+    sticker: null,
+  };
 }
 
 /**
@@ -335,6 +365,30 @@ function sanitizeReplyRef(value: unknown): ReplyRef | null {
     senderId: ref.senderId,
     senderUsername: ref.senderUsername.slice(0, 32),
     preview: ref.preview.slice(0, MAX_REPLY_PREVIEW_LENGTH),
+  };
+}
+
+/**
+ * Sticker-Referenzen stammen vom (nur signierten, nicht vertrauenswürdigen)
+ * Absender: Die ID muss wie eine Server-ID aussehen (sie landet in einer URL
+ * und als React-Key), der MIME-Typ muss ein image/*-Typ sein (er landet im
+ * Blob-Typ) – sonst wird das Feld verworfen bzw. weggelassen.
+ */
+function sanitizeStickerRef(value: unknown): StickerRef | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const ref = value as Partial<StickerRef>;
+  if (
+    typeof ref.id !== 'string' ||
+    !MESSAGE_ID_PATTERN.test(ref.id) ||
+    typeof ref.name !== 'string'
+  ) {
+    return null;
+  }
+  const mimeOk = typeof ref.mimeType === 'string' && /^image\/[\w.+-]{1,64}$/.test(ref.mimeType);
+  return {
+    id: ref.id,
+    name: ref.name.slice(0, MAX_STICKER_NAME_LENGTH),
+    ...(mimeOk ? { mimeType: ref.mimeType } : {}),
   };
 }
 

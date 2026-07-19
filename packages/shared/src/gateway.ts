@@ -95,6 +95,9 @@ export type GatewayEventType =
   // sitzen) bzw. Bibliothek geändert (an Mitglieder mit ViewChannels).
   | 'SOUNDBOARD_PLAY'
   | 'SOUNDBOARD_UPDATE'
+  // Sticker: Bibliothek geändert (an Mitglieder mit ViewChannels) – das
+  // VERSCHICKEN eines Stickers ist eine normale MESSAGE_CREATE (E2EE).
+  | 'STICKER_UPDATE'
   // Phase 15 – Profil geändert (Status/Avatar): geht an den Sichtbarkeits-
   // kreis + den Nutzer selbst; Clients aktualisieren Mitglieder-/Freundes-/
   // DM-Listen in place.

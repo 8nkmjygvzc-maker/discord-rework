@@ -14,6 +14,7 @@ import type {
   ServerSelfRemovedPayload,
   SoundboardPlayPayload,
   SoundboardUpdatePayload,
+  StickerUpdatePayload,
   TypingStartPayload,
   UserUpdatePayload,
   VoiceStateUpdatePayload,
@@ -22,6 +23,7 @@ import { GatewayClient } from './gateway';
 import { e2ee } from './e2ee';
 import { resetAttachmentCache } from './attachments';
 import { resetSoundboardCache } from './soundboard';
+import { resetStickerCache } from './stickers';
 import { rememberChannelLabel, resetChannelLabels } from './notifications';
 import { useAuthStore } from '../store/auth';
 import { usePresenceStore } from '../store/presence';
@@ -31,6 +33,7 @@ import { useFriendsStore } from '../store/friends';
 import { useDmsStore } from '../store/dms';
 import { useVoiceStore } from '../store/voice';
 import { useSoundboardStore } from '../store/soundboard';
+import { useStickersStore } from '../store/stickers';
 import { useNoticesStore } from '../store/notices';
 
 /**
@@ -94,6 +97,9 @@ const client = new GatewayClient({
         useSoundboardStore
           .getState()
           .handleSoundboardUpdate((d as SoundboardUpdatePayload).serverId);
+        return;
+      case 'STICKER_UPDATE':
+        useStickersStore.getState().handleStickerUpdate((d as StickerUpdatePayload).serverId);
         return;
       case 'USER_UPDATE': {
         // Profiländerung (Status/Avatar, Phase 15) in alle Listen einspielen.
@@ -211,6 +217,7 @@ export const gateway = {
     e2ee.reset();
     resetAttachmentCache();
     resetSoundboardCache();
+    resetStickerCache();
     resetChannelLabels();
     usePresenceStore.getState().handleDisconnected();
     useServersStore.getState().reset();
@@ -219,6 +226,7 @@ export const gateway = {
     useDmsStore.getState().reset();
     useVoiceStore.getState().reset();
     useSoundboardStore.getState().reset();
+    useStickersStore.getState().reset();
     useNoticesStore.getState().reset();
   },
 };

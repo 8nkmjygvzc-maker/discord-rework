@@ -31,6 +31,12 @@ export const Permissions = {
   UseSoundboard: 1n << 12n,
   /** Soundboard-Sounds hochladen, umbenennen, löschen. */
   ManageSoundboard: 1n << 13n,
+  /**
+   * Sticker hochladen, umbenennen, löschen. Zum VERSCHICKEN eines Stickers
+   * braucht es kein eigenes Recht – das ist eine normale Nachricht
+   * (SendMessages), der Server kann sie ohnehin nicht unterscheiden (E2EE).
+   */
+  ManageStickers: 1n << 14n,
 } as const;
 
 export type PermissionName = keyof typeof Permissions;
@@ -58,6 +64,7 @@ export const PERMISSION_LIST: { name: PermissionName; label: string }[] = [
   { name: 'CreateInvite', label: 'Einladungen erstellen' },
   { name: 'UseSoundboard', label: 'Soundboard verwenden' },
   { name: 'ManageSoundboard', label: 'Soundboard verwalten' },
+  { name: 'ManageStickers', label: 'Sticker verwalten' },
   { name: 'Administrator', label: 'Administrator (alle Rechte)' },
 ];
 
